@@ -1,0 +1,9 @@
+%%% Copy .app to .app.src for rebar.
+[AppFile] = filelib:wildcard("*.app", "src"),
+RebarAppSrcFile = filename:join("src", AppFile ++ ".src"),
+case filelib:is_file(RebarAppSrcFile) of
+    true -> ok;
+    false ->
+        {ok, _} = file:copy(filename:join("src", AppFile), RebarAppSrcFile)
+end,
+CONFIG.
