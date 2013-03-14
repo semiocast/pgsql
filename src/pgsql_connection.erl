@@ -142,21 +142,23 @@
 %%--------------------------------------------------------------------
 %% @doc Open a connection to a database, throws an error if it failed.
 %% 
--spec open(string()) -> pgsql_connection().
+-spec open(iodata() | open_options()) -> pgsql_connection().
+open([Option | _OptionsT] = Options) when is_tuple(Option) orelse is_atom(Option) ->
+    open0(Options);
 open(Database) ->
     open(Database, ?DEFAULT_USER).
 
 %%--------------------------------------------------------------------
 %% @doc Open a connection to a database, throws an error if it failed.
 %% 
--spec open(string(), string()) -> pgsql_connection().
+-spec open(iodata(), iodata()) -> pgsql_connection().
 open(Database, User) ->
     open(Database, User, ?DEFAULT_PASSWORD).
 
 %%--------------------------------------------------------------------
 %% @doc Open a connection to a database, throws an error if it failed.
 %% 
--spec open(string(), string(), string()) -> pgsql_connection().
+-spec open(iodata(), iodata(), iodata()) -> pgsql_connection().
 open(Database, User, Password) ->
     open(?DEFAULT_HOST, Database, User, Password).
 
@@ -173,6 +175,9 @@ open(Host, Database, User, Password) ->
 -spec open(string(), string(), string(), string(), open_options()) -> pgsql_connection().
 open(Host, Database, User, Password, Options0) ->
     Options = [{host, Host}, {database, Database}, {user, User}, {password, Password} | Options0],
+    open0(Options).
+
+open0(Options) ->
     case pgsql_connection_sup:start_child(Options) of
         {ok, Pid} ->
             {pgsql_connection, Pid};

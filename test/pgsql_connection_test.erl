@@ -29,6 +29,26 @@ open_close_test_() ->
             R = pgsql_connection:open("test", "test"),
             pgsql_connection:close(R)
         end)},
+        {"Open connection to test database with test account, expliciting empty password",
+        ?_test(begin
+            R = pgsql_connection:open("test", "test", ""),
+            pgsql_connection:close(R)
+        end)},
+        {"Open connection to test database with test account, expliciting host",
+        ?_test(begin
+            R = pgsql_connection:open("0.0.0.0", "test", "test", ""),
+            pgsql_connection:close(R)
+        end)},
+        {"Open connection to test database with test account, expliciting host and options",
+        ?_test(begin
+            R = pgsql_connection:open("0.0.0.0", "test", "test", "", [{application_name, eunit_tests}]),
+            pgsql_connection:close(R)
+        end)},
+        {"Open connection to test database with options as list",
+        ?_test(begin
+            R = pgsql_connection:open([{host, "0.0.0.0"}, {database, "test"}, {user, "test"}, {password, ""}]),
+            pgsql_connection:close(R)
+        end)},
         {"Bad user throws",
         ?_test(begin
             try
