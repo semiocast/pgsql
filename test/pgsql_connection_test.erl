@@ -916,8 +916,9 @@ notify_test_() ->
             end),
             R = pgsql_connection:simple_query("NOTIFY test_channel", Conn2),
             ?assertEqual({notify, []}, R),
-            % Possible orders are : sleep_1, notification, sleep_2 or notification, sleep_1, sleep_2.
-            % (PostgreSQL 9.2 seems to send notification after sleep_1 is completed).
+            % Acceptable orders are : sleep_1, notification, sleep_2 or notification, sleep_1, sleep_2.
+            % PostgreSQL currently (9.2) sends notification after sleep_1 is completed, once the transaction is finished.
+            % See note at http://www.postgresql.org/docs/9.2/static/protocol-flow.html#PROTOCOL-ASYNC
             Message0 = receive {AsyncProcess, Msg0} -> Msg0 after 1500 -> ?assert(false) end,
             Message1 = receive {AsyncProcess, Msg1} -> Msg1 after 1500 -> ?assert(false) end,
             Message2 = receive {AsyncProcess, Msg2} -> Msg2 after 1500 -> ?assert(false) end,
