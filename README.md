@@ -67,6 +67,15 @@ Cancel the current running query. This opens a new connection to cancel the quer
 
 The driver also has an ODBC-like interface, which is deprecated. It is composed of ```sql_query/2,3,4```, ```param_query/3,4,5``` and utility function ```convert_statement/1```
 
+### Asynchronous operations ###
+
+Besides cancelation, the driver supports what PostgreSQL documentation calls [Asynchronous operations](http://www.postgresql.org/docs/current/static/protocol-flow.html#PROTOCOL-ASYNC). Namely, it can receive several types of messages when the connection is idle or at any point in the protocol. This is especially meaningful for notifications and notices. These messages are ignored by default but can be sent to subscribers. To subscribe when opening a connection, simply use ```{async, pid()}``` option. To subscribe later, use ```pgsql_connection:subscribe/2```. Subscribers can presently receive two types of Erlang messages:
+
+* ```{pgsql, Connection, {notice, Fields :: [{atom(), binary()}]}}``` for notices, where ```Connection``` is the connection tuple and Fields describes the notice (typically including ```{severity, <<"NOTICE">>}``` and ```{message, NoticeMessage}```).
+* ```{pgsql, Connection, {notification, ProcID :: pos_integer(), Channel :: binary(), Payload :: binary()}}``` for notifications, where ```ProcID``` is the sender backend id.
+
+Implementers of subscribers are encouraged to handle any message of the form ```{pgsql, Connection, _}``` to cope with future features.
+
 Tests
 -----
 
