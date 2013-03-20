@@ -39,6 +39,11 @@ open_close_test_() ->
             R = pgsql_connection:open("0.0.0.0", "test", "test", ""),
             pgsql_connection:close(R)
         end)},
+        {"Open connection to test database with test account, expliciting host, using IP for host and binaries for account/database/password",
+        ?_test(begin
+            R = pgsql_connection:open({0,0,0,0}, <<"test">>, <<"test">>, <<>>),
+            pgsql_connection:close(R)
+        end)},
         {"Open connection to test database with test account, expliciting host and options",
         ?_test(begin
             R = pgsql_connection:open("0.0.0.0", "test", "test", "", [{application_name, eunit_tests}]),

@@ -104,7 +104,7 @@
 
 % driver options.
 -type open_option() ::
-        {host, iodata()}                        % default: ?DEFAULT_HOST
+        {host, inet:ip_address() | inet:hostname()} % default: ?DEFAULT_HOST
     |   {port, integer()}                       % default: ?DEFAULT_PORT
     |   {database, iodata()}                    % default: user
     |   {user, iodata()}                        % default: ?DEFAULT_USER
