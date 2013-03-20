@@ -1,6 +1,6 @@
 %% @doc PostgreSQL connection (high level functions).
 -module(pgsql_connection).
--vsn("8").
+-vsn("9").
 -behaviour(gen_server).
 -include("pgsql_internal.hrl").
 
@@ -42,7 +42,12 @@
     foreach/5,
     foreach/6,
     
+    % Cancel current query
     cancel/1,
+
+    % Subscribe to notifications.
+    subscribe/2,
+    unsubscribe/2,
 
     % Compatibility (deprecated) API
     sql_query/2,
@@ -92,7 +97,7 @@
 -type odbc_result_tuple() :: {updated, n_rows()} | {updated, n_rows(), rows()} | {selected, rows()}.
 
 -type result_tuple() ::
-    {'begin' | commit | rollback | set | {declare, cursor} | {lock, table}, []}
+    {'begin' | commit | 'do' | listen | notify | rollback | set | {declare, cursor} | {lock, table}, []}
     | {{insert, integer(), integer()}, rows()}
     | {{copy | delete | fetch | move | select | update, integer()}, rows()}
     | {{alter | create | drop, atom()}, []}.
@@ -114,6 +119,7 @@
     |   {reconnect, boolean()}                  % default: true
     |   {application_name, atom() | iodata()}   % default: node()
     |   {timezone, iodata() | undefined}        % default: undefined (not set)
+    |   {async, pid()}                          % subscribe to notifications (default: no)
     |   proplists:property().                   % undocumented !
 -type open_options() :: [open_option()].
 -type query_option() ::
@@ -128,6 +134,7 @@
 -record(state, {
       options           :: open_options(),
       socket            :: socket() | closed,   %% gen_tcp or ssl socket
+      subscribers       :: [{pid(), reference()}],
       backend_procid    :: integer(),
       backend_secret    :: integer(),
       integer_datetimes :: boolean(),
@@ -345,6 +352,21 @@ foreach(Function, Query, Parameters, QueryOptions, Timeout, {pgsql_connection, C
 cancel({pgsql_connection, ConnectionPid}) ->
     gen_server:call(ConnectionPid, cancel, ?REQUEST_TIMEOUT).
 
+%%--------------------------------------------------------------------
+%% @doc Subscribe to notifications. Subscribers get notifications as
+%% <code>{pgsql, Connection, {notification, ProcID, Channel, Payload}}</code>
+%%
+-spec subscribe(pid(), pgsql_connection()) -> ok | {error, any()}.
+subscribe(Pid, {pgsql_connection, ConnectionPid}) ->
+    gen_server:cast(ConnectionPid, {subscribe, Pid}).
+
+%%--------------------------------------------------------------------
+%% @doc Unsubscribe to notifications.
+%%
+-spec unsubscribe(pid(), pgsql_connection()) -> ok | {error, any()}.
+unsubscribe(Pid, {pgsql_connection, ConnectionPid}) ->
+    gen_server:cast(ConnectionPid, {unsubscribe, Pid}).
+
 %%====================================================================
 %% Supervisor API
 %%====================================================================
@@ -366,14 +388,21 @@ start_link(Options) ->
 -spec init(open_options()) -> {ok, #state{}} | {stop, any()}.
 init(Options) ->
     process_flag(trap_exit, true),
+    Subscribers = case lists:keyfind(async, 1, Options) of
+        false -> [];
+        {async, SubscriberPid} -> do_subscribe(SubscriberPid, [])
+    end,
     State0 = #state{
         options = Options,
         socket = closed,
+        subscribers = Subscribers,
         oidmap = gb_trees:from_orddict(orddict:from_list(?PG_TYPE_H_TYPES_DICT)),
         pending = []
     },
     case pgsql_open(State0) of
-        {ok, State1} -> {ok, State1};
+        {ok, State1} ->
+            set_active_once(State1),
+            {ok, State1};
         {error, OpenErrorReason} -> {stop, OpenErrorReason}
     end.
 
@@ -403,6 +432,14 @@ handle_cast({socket_closed, _ClosedSocket}, #state{socket = _OtherSocket} = Stat
     {noreply, State};
 handle_cast({command_completed, CurrentCommand}, #state{} = State0) ->
     State1 = command_completed(CurrentCommand, State0),
+    {noreply, State1};
+handle_cast({subscribe, Pid}, #state{subscribers = Subscribers0} = State0) ->
+    Subscribers1 = do_subscribe(Pid, Subscribers0),
+    State1 = State0#state{subscribers = Subscribers1},
+    {noreply, State1};
+handle_cast({unsubscribe, Pid}, #state{subscribers = Subscribers0} = State0) ->
+    Subscribers1 = do_unsubscribe(Pid, Subscribers0),
+    State1 = State0#state{subscribers = Subscribers1},
     {noreply, State1}.
 
 %%--------------------------------------------------------------------
@@ -412,30 +449,42 @@ handle_cast({command_completed, CurrentCommand}, #state{} = State0) ->
 handle_info({'EXIT', _From, normal}, State) ->
     {noreply, State};
 handle_info({'EXIT', _From, Reason}, State) ->
-    {stop, Reason, State}.
+    {stop, Reason, State};
+handle_info({'DOWN', MonitorRef, process, _Pid, _Info}, #state{subscribers = Subscribers0} = State0) ->
+    Subscribers1 = lists:keydelete(MonitorRef, 2, Subscribers0),
+    State1 = State0#state{subscribers = Subscribers1},
+    {noreply, State1};
+handle_info({_Tag, Socket, Data}, #state{socket = {_SocketModule, Socket}} = State0) ->
+    State1 = process_active_data(Data, State0),
+    set_active_once(State1),
+    {noreply, State1};
+handle_info({ClosedTag, Socket}, #state{socket = {_SocketModule, Socket}} = State0) when ClosedTag =:= tcp_closed orelse ClosedTag =:= ssl_closed ->
+    State1 = State0#state{socket = closed},
+    {noreply, State1};
+handle_info({Tag, _OtherSocket, _Data}, State0) when Tag =:= tcp orelse Tag =:= ssl ->
+    {noreply, State0};
+handle_info({ClosedTag, _OtherSocket}, State0) when ClosedTag =:= tcp_closed orelse ClosedTag =:= ssl_closed ->
+    {noreply, State0}.
 
 %%--------------------------------------------------------------------
 %% @doc handle code change.
 %%
 -spec code_change(string() | {down, string()}, any(), any()) -> {ok, #state{}}.
-code_change("5", State5, _Extra) ->
-    Current5 = State5#state.current,
-    Current6 = case Current5 of
-        undefined -> undefined;
-        {Command, MonitorRef, From} ->
-            erlang:demonitor(MonitorRef),
-            {Command, From}
-    end,
-    Pending5 = State5#state.pending,
-    Pending6 = [{PendingCommand, PendingFrom} || {PendingCommand, _PendingMonitor, PendingFrom} <- Pending5],
-    lists:foreach(fun({_PendingCommand, PendingMonitor, _PendingFrom}) ->
-        erlang:demonitor(PendingMonitor)
-    end, Pending5),
-    State6 = State5#state{
-        current = Current6,
-        pending = Pending6
+code_change("8", State8, _Extra) ->
+    {state, Options, Socket, BackendProcId, BackendSecret, IntegerDateTimes, OidMap, Current, Pending, StatementTimeout} = State8,
+    State9 = #state{
+        options = Options,
+        socket = Socket,
+        subscribers = [],
+        backend_procid = BackendProcId,
+        backend_secret = BackendSecret,
+        integer_datetimes = IntegerDateTimes,
+        oidmap = OidMap,
+        current = Current,
+        pending = Pending,
+        statement_timeout = StatementTimeout
     },
-    {ok, State6};
+    {ok, State9};
 code_change(Vsn, State, Extra) ->
     error_logger:info_msg("~p: unknown code_change (~p, ~p, ~p)~n", [?MODULE, Vsn, State, Extra]),
     {ok, State}.
@@ -508,7 +557,7 @@ pgsql_setup_ssl(Sock, #state{} = State0) ->
         {error, _} = SendSSLRequestError -> SendSSLRequestError
     end.
 
-pgsql_setup_startup(#state{socket = {SockModule, Sock} = Socket, options = Options} = State0) ->
+pgsql_setup_startup(#state{socket = {SockModule, Sock} = Socket, options = Options, subscribers = Subscribers} = State0) ->
     % Send startup packet connection packet.
     User = proplists:get_value(user, Options, ?DEFAULT_USER),
     Database = proplists:get_value(database, Options, User),
@@ -523,7 +572,7 @@ pgsql_setup_startup(#state{socket = {SockModule, Sock} = Socket, options = Optio
     StartupMessage = pgsql_protocol:encode_startup_message([{<<"user">>, User}, {<<"database">>, Database}, {<<"application_name">>, ApplicationName} | TZOpt]),
     case SockModule:send(Sock, StartupMessage) of
         ok ->
-            case receive_message(Socket) of
+            case receive_message(Socket, sync, Subscribers) of
                 {ok, #error_response{fields = Fields}} ->
                     {error, {pgsql_error, Fields}};
                 {ok, #authentication_ok{}} ->
@@ -564,11 +613,11 @@ pgsql_setup_authenticate_md5_password(Socket, Salt, #state{options = Options} = 
     MD5ChallengeResponse = ["md5", MD52Hex],
     pgsql_setup_authenticate_password(Socket, MD5ChallengeResponse, State0).
 
-pgsql_setup_authenticate_password({SockModule, Sock} = Socket, Password, State0) ->
+pgsql_setup_authenticate_password({SockModule, Sock} = Socket, Password, #state{subscribers = Subscribers} = State0) ->
     Message = pgsql_protocol:encode_password_message(Password),
     case SockModule:send(Sock, Message) of
         ok ->
-            case receive_message(Socket) of
+            case receive_message(Socket, sync, Subscribers) of
                 {ok, #error_response{fields = Fields}} ->
                     {error, {pgsql_error, Fields}};
                 {ok, #authentication_ok{}} ->
@@ -580,8 +629,8 @@ pgsql_setup_authenticate_password({SockModule, Sock} = Socket, Password, State0)
         {error, _} = SendError -> SendError
     end.
 
-pgsql_setup_finish(Socket, State0) ->
-    case receive_message(Socket) of
+pgsql_setup_finish(Socket, #state{subscribers = Subscribers} = State0) ->
+    case receive_message(Socket, sync, Subscribers) of
         {ok, #parameter_status{name = Name, value = Value}} ->
             State1 = handle_parameter(Name, Value, sync, State0),
             pgsql_setup_finish(Socket, State1);
@@ -589,9 +638,6 @@ pgsql_setup_finish(Socket, State0) ->
             pgsql_setup_finish(Socket, State0#state{backend_procid = ProcID, backend_secret = Secret});
         {ok, #ready_for_query{}} ->
             {ok, State0};
-        {ok, #notice_response{fields = Fields}} ->
-            error_logger:info_msg("NOTICE\n~p\n", [Fields]),
-            pgsql_setup_finish(Socket, State0);
         {ok, #error_response{fields = Fields}} ->
             {error, {pgsql_error, Fields}};
         {ok, Message} ->
@@ -652,8 +698,8 @@ pgsql_simple_query0(Query, AsyncT, #state{socket = {SockModule, Sock}} = State) 
             return_async(SendQueryError, AsyncT, State)
     end.
 
-pgsql_simple_query_loop(Result0, Acc, AsyncT, #state{socket = Socket} = State0) ->
-    case receive_message(Socket) of
+pgsql_simple_query_loop(Result0, Acc, AsyncT, #state{socket = Socket, subscribers = Subscribers} = State0) ->
+    case receive_message(Socket, AsyncT, Subscribers) of
         {ok, #parameter_status{name = Name, value = Value}} ->
             State1 = handle_parameter(Name, Value, AsyncT, State0),
             pgsql_simple_query_loop(Result0, Acc, AsyncT, State1);
@@ -680,8 +726,6 @@ pgsql_simple_query_loop(Result0, Acc, AsyncT, #state{socket = Socket} = State0) 
             Error = {error, {pgsql_error, Fields}},
             Acc1 = [Error | Acc],
             pgsql_simple_query_loop([], Acc1, AsyncT, State0);
-        {ok, #notice_response{}} ->
-            pgsql_simple_query_loop(Result0, Acc, AsyncT, State0);
         {ok, #ready_for_query{}} ->
             Result = case Acc of
                 [SingleResult] -> SingleResult;
@@ -761,8 +805,8 @@ pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, AsyncT, #
             return_async(SendSinglePacketError, AsyncT, State)
     end.
 
-pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock} = Socket} = State0) ->
-    case receive_message(Socket) of
+pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock} = Socket, subscribers = Subscribers} = State0) ->
+    case receive_message(Socket, AsyncT, Subscribers) of
         {ok, #parameter_status{name = Name, value = Value}} ->
             State1 = handle_parameter(Name, Value, AsyncT, State0),
             pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State1);
@@ -801,8 +845,6 @@ pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep
         {ok, #ready_for_query{}} when is_tuple(LoopState) andalso element(1, LoopState) =:= result ->
             Result = element(2, LoopState),
             return_async(Result, AsyncT, State0);
-        {ok, #notice_response{}} ->
-            pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
         {ok, #error_response{fields = Fields}} ->
             Error = {error, {pgsql_error, Fields}},
             if  MaxRowsStep > 0 ->
@@ -824,8 +866,8 @@ pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep
 pgsql_extended_query_receive_loop(_LoopState, _Fun, _Acc, _FinalizeFun, _MaxRowsStep, AsyncT, #state{socket = closed} = State0) ->
     return_async({error, closed}, AsyncT, State0).
 
-flush_until_ready_for_query(Result, AsyncT, #state{socket = Socket} = State0) ->
-    case receive_message(Socket) of
+flush_until_ready_for_query(Result, AsyncT, #state{socket = Socket, subscribers = Subscribers} = State0) ->
+    case receive_message(Socket, AsyncT, Subscribers) of
         {ok, #parameter_status{name = Name, value = Value}} ->
             State1 = handle_parameter(Name, Value, AsyncT, State0),
             flush_until_ready_for_query(Result, AsyncT, State1);
@@ -905,11 +947,12 @@ convert_statement_0([H | Tail], InString, PlaceholderIndex, Acc) ->
     convert_statement_0(Tail, InString, PlaceholderIndex, [H | Acc]).
 
 %%--------------------------------------------------------------------
-%% @doc Receive a single packet.
+%% @doc Receive a single packet (in passive mode). Notifications and
+%% notices are broadcast to subscribers.
 %%
--spec receive_message(socket()) -> {ok, pgsql_backend_message()} | {error, any()}.
-receive_message({SockModule, Sock}) ->
-    case SockModule:recv(Sock, ?MESSAGE_HEADER_SIZE) of
+-spec receive_message(socket(), sync | {async, pid(), fun((any()) -> ok)}, [{pid(), reference()}]) -> {ok, pgsql_backend_message()} | {error, any()}.
+receive_message({SockModule, Sock}, AsyncT, Subscribers) ->
+    Result0 = case SockModule:recv(Sock, ?MESSAGE_HEADER_SIZE) of
         {ok, <<Code:8/integer, Size:32/integer>>} ->
             Payload = Size - 4,
             case Payload of
@@ -923,7 +966,35 @@ receive_message({SockModule, Sock}) ->
                     end
             end;
         {error, _} = ErrorRecvPacketHeader -> ErrorRecvPacketHeader
+    end,
+    case Result0 of
+        {ok, #notification_response{} = Notification} ->
+            broadcast_to_subscribers(Notification, AsyncT, Subscribers),
+            receive_message({SockModule, Sock}, AsyncT, Subscribers);
+        {ok, #notice_response{} = Notice} ->
+            broadcast_to_subscribers(Notice, AsyncT, Subscribers),
+            receive_message({SockModule, Sock}, AsyncT, Subscribers);
+        _ -> Result0
     end.
+
+-spec broadcast_to_subscribers(
+            #notification_response{} | #notice_response{},
+            sync | {async, pid(), fun((any()) -> ok)},
+            [{pid(), reference()}]) -> ok.
+broadcast_to_subscribers(Packet, AsyncT, Subscribers) ->
+    ConnPid = case AsyncT of
+        sync -> self();
+        {async, Pid, _Fun} -> Pid
+    end,
+    Connection = {?MODULE, ConnPid},
+    What = case Packet of
+        #notification_response{procid = ProcID, channel = Channel, payload = Payload} -> {notification, ProcID, Channel, Payload};
+        #notice_response{fields = Fields} -> {notice, Fields}
+    end,
+    Message = {pgsql, Connection, What},
+    lists:foreach(fun({Subscriber, _Ref}) ->
+        Subscriber ! Message
+    end, Subscribers).
 
 %%--------------------------------------------------------------------
 %% @doc Decode a command complete tag and result rows and form a result
@@ -973,6 +1044,9 @@ native_to_odbc({'begin', []}) -> {updated, 0};
 native_to_odbc({commit, []}) -> {updated, 0};
 %native_to_odbc({rollback, []}) -> {updated, 0};    -- make sure rollback fails.
 native_to_odbc({set, []}) -> {updated, 0};
+native_to_odbc({listen, []}) -> {updated, 0};
+native_to_odbc({notify, []}) -> {updated, 0};
+native_to_odbc({'do', []}) -> {updated, 0};
 native_to_odbc({Other, []}) -> {error, {pgsql_error, {unknown_command, Other}}}.
 
 adjust_timeout(infinity) -> infinity;
@@ -1028,15 +1102,99 @@ update_oid_map(#state{} = State0) ->
     State1#state{oidmap = NewOIDMap}.
 
 %%--------------------------------------------------------------------
-%% @doc Reconnect the socket unless reconnect option is set to false.
+%% @doc Prepare socket for sending query: set it in passive mode or
+%% reconnect if it was closed and options allow it.
 %%
--spec reconnect_if_required(#state{}) -> #state{}.
-reconnect_if_required(#state{socket = closed, options = Options} = State0) ->
+-spec set_passive_or_reconnect_if_required(#state{}) -> #state{}.
+set_passive_or_reconnect_if_required(#state{socket = closed, options = Options} = State0) ->
     case proplists:get_value(reconnect, Options, true) of
         true -> pgsql_open(State0);
         false -> State0
     end;
-reconnect_if_required(#state{} = State0) -> State0.
+set_passive_or_reconnect_if_required(#state{socket = {gen_tcp, Socket}} = State0) ->
+    _ = inet:setopts(Socket, [{active, false}]),
+    State0;
+set_passive_or_reconnect_if_required(#state{socket = {ssl, Socket}} = State0) ->
+    _ = ssl:setopts(Socket, [{active, false}]),
+    State0.
+
+%%--------------------------------------------------------------------
+%% @doc Set the socket in active mode for a single packet (a notification).
+%%
+-spec set_active_once(#state{}) -> ok.
+set_active_once(#state{socket = closed}) -> ok;
+set_active_once(#state{socket = {gen_tcp, Socket}}) ->
+    _ = inet:setopts(Socket, [{active, once}]),
+    ok;
+set_active_once(#state{socket = {ssl, Socket}}) ->
+    _ = ssl:setopts(Socket, [{active, once}]),
+    ok.
+
+%%--------------------------------------------------------------------
+%% @doc Process some active data.
+%%
+-spec process_active_data(binary(), #state{}) -> #state{}.
+process_active_data(<<Code:8/integer, Size:32/integer, Tail/binary>>, #state{socket = {SockModule, Sock}, subscribers = Subscribers} = State0) ->
+    TailSize = byte_size(Tail),
+    Payload = Size - 4,
+    DecodeT = case Payload of
+        0 ->
+            {pgsql_protocol:decode_message(Code, <<>>), Tail};
+        _ when Payload =< TailSize ->
+            {PayloadBin, Rest0} = split_binary(Tail, Payload),
+            {pgsql_protocol:decode_message(Code, PayloadBin), Rest0};
+        _ when Payload > TailSize ->
+            case SockModule:recv(Sock, Payload - TailSize) of
+                {ok, Missing} ->
+                    {pgsql_protocol:decode_message(Code, list_to_binary([Tail, Missing])), <<>>};
+                {error, _} = ErrorRecvPacket ->
+                    {ErrorRecvPacket, <<>>}
+            end
+    end,
+    case DecodeT of
+        {{ok, #notification_response{} = Notification}, Rest} ->
+            broadcast_to_subscribers(Notification, sync, Subscribers),
+            process_active_data(Rest, State0);
+        {{ok, #notice_response{} = Notice}, Rest} ->
+            broadcast_to_subscribers(Notice, sync, Subscribers),
+            process_active_data(Rest, State0);
+        {{ok, Message}, Rest} ->
+            error_logger:warning_msg("Unexpected asynchronous message\n~p\n", [Message]),
+            process_active_data(Rest, State0);
+        {{error, _} = Error, _Rest} ->
+            error_logger:error_msg("Unexpected asynchronous error\n~p\n", [Error]),
+            SockModule:close(Sock),
+            State0#state{socket = closed}
+    end;
+process_active_data(<<>>, State0) -> State0;
+process_active_data(PartialHeader, #state{socket = {SockModule, Sock}} = State0) ->
+    PartialHeaderSize = byte_size(PartialHeader),
+    case SockModule:recv(Sock, ?MESSAGE_HEADER_SIZE - PartialHeaderSize) of
+        {ok, Rest} ->
+            process_active_data(list_to_binary([PartialHeader, Rest]), State0);
+        {error, _} = Error ->
+            error_logger:error_msg("Unexpected asynchronous error\n~p\n", [Error]),
+            SockModule:close(Sock),
+            State0#state{socket = closed}
+    end.    
+
+%%--------------------------------------------------------------------
+%% @doc Subscribe to notifications. We setup a monitor to clean the list up.
+%%
+do_subscribe(Pid, List) ->
+    MonitorRef = erlang:monitor(process, Pid),
+    [{Pid, MonitorRef} | List].
+
+%%--------------------------------------------------------------------
+%% @doc Unsubscribe to notifications. Clear the monitor.
+%%
+do_unsubscribe(Pid, List) ->
+    case lists:keyfind(Pid, 1, List) of
+        {Pid, MonitorRef} ->
+            erlang:demonitor(MonitorRef),
+            lists:keydelete(Pid, 1, List);
+        false -> List
+    end.
 
 %%--------------------------------------------------------------------
 %% @doc Send a call message to the gen server, retrying if the result is
@@ -1055,7 +1213,7 @@ call_and_retry(ConnPid, Command, Retry, Timeout) ->
 %%
 do_query(Command, From, #state{current = undefined} = State0) ->
     State1 = State0#state{current = {Command, From}},
-    State2 = reconnect_if_required(State1),
+    State2 = set_passive_or_reconnect_if_required(State1),
     do_query0(Command, From, State2);
 do_query(Command, From, #state{pending = Pending} = State0) ->
     State0#state{pending = [{Command, From} | Pending]}.
@@ -1077,6 +1235,7 @@ do_query0({foreach, Query, Parameters, Function, QueryOptions, Timeout}, From, #
     pgsql_extended_query(Query, Parameters, fun foreach_fn/2, Function, fun foreach_finalize/2, {cursor, MaxRowsStep}, Timeout, From, State0).
 
 command_completed(Command, #state{current = Command, pending = []} = State) ->
+    set_active_once(State),
     State#state{current = undefined};
 command_completed(Command, #state{current = Command, pending = [{PendingCommand, PendingFrom} | PendingT]} = State0) ->
     State1 = State0#state{current = undefined, pending = PendingT},

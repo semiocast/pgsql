@@ -1,7 +1,7 @@
-{"17",
-    [{"16", [
-        {load_module, pgsql_protocol, soft_purge, soft_purge, []}
+{"18",
+    [{"17", [
+        {update, pgsql_connection, {advanced, []}, soft_purge, soft_purge, []}
     ]}],
-    [{"16", [
+    [{"17", [
         ]}]
 }.

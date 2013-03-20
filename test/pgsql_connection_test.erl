@@ -842,3 +842,150 @@ batch_test_() ->
         ?_assertEqual([{{select, 1}, [{<<"bar">>}]},{{select, 1}, [{<<"foo">>}]},{{select, 1}, [{null}]}], pgsql_connection:batch_query("select $1::bytea", [[<<"bar">>], [<<"foo">>], [null]], Conn))
     ]
     end}.
+
+async_process_loop(TestProcess) ->
+    receive
+        {set_test_process, Pid} ->
+            async_process_loop(Pid);
+        OtherMessage ->
+            ?assert(is_pid(TestProcess)),
+            TestProcess ! {self(), OtherMessage},
+            async_process_loop(TestProcess)
+    end.
+        
+notify_test_() ->
+    {setup,
+    fun() ->
+        {ok, SupPid} = pgsql_connection_sup:start_link(),
+        AsyncProcess = spawn_link(fun() ->
+            async_process_loop(undefined)
+        end),
+        Conn1 = pgsql_connection:open([{database, "test"}, {user, "test"}, {async, AsyncProcess}]),
+        Conn2 = pgsql_connection:open("test", "test"),
+        {SupPid, Conn1, Conn2, AsyncProcess}
+    end,
+    fun({SupPid, Conn1, Conn2, AsyncProcess}) ->
+        pgsql_connection:close(Conn1),
+        pgsql_connection:close(Conn2),
+        unlink(AsyncProcess),
+        exit(AsyncProcess, normal),
+        kill_sup(SupPid)
+    end,
+    fun({_SupPid, Conn1, Conn2, AsyncProcess}) ->
+    [
+        ?_test(begin
+            R = pgsql_connection:simple_query("LISTEN test_channel", Conn1),
+            ?assertEqual({listen, []}, R)
+        end),
+        {"Notifications are received while idle",
+        ?_test(begin
+            AsyncProcess ! {set_test_process, self()},
+            R = pgsql_connection:simple_query("NOTIFY test_channel", Conn2),
+            ?assertEqual({notify, []}, R),
+            receive {AsyncProcess, NotifyMessage} ->
+                ?assertMatch({pgsql, Conn1, {notification, _PID, <<"test_channel">>, <<>>}}, NotifyMessage)
+            after 1000 -> ?assert(false)
+            end
+        end)
+        },
+        {"Notifications are received with payload",
+        ?_test(begin
+            AsyncProcess ! {set_test_process, self()},
+            R = pgsql_connection:simple_query("NOTIFY test_channel, 'payload string'", Conn2),
+            ?assertEqual({notify, []}, R),
+            receive {AsyncProcess, NotifyMessage} ->
+                ?assertMatch({pgsql, Conn1, {notification, _PID, <<"test_channel">>, <<"payload string">>}}, NotifyMessage)
+            after 1000 -> ?assert(false)
+            end
+        end)
+        },
+        {"Notifications are received with a busy connection executing several requests",
+        ?_test(begin
+            Parent = self(),
+            AsyncProcess ! {set_test_process, Parent},
+            spawn_link(fun() ->
+                R = pgsql_connection:simple_query("SELECT pg_sleep(0.5)", Conn1),
+                ?assertEqual({{select, 1}, [{null}]}, R),
+                AsyncProcess ! sleep_1
+            end),
+            timer:sleep(100),
+            spawn_link(fun() ->
+                R = pgsql_connection:simple_query("SELECT pg_sleep(0.5)", Conn1),
+                ?assertEqual({{select, 1}, [{null}]}, R),
+                AsyncProcess ! sleep_2
+            end),
+            R = pgsql_connection:simple_query("NOTIFY test_channel", Conn2),
+            ?assertEqual({notify, []}, R),
+            % Possible orders are : sleep_1, notification, sleep_2 or notification, sleep_1, sleep_2.
+            % (PostgreSQL 9.2 seems to send notification after sleep_1 is completed).
+            Message0 = receive {AsyncProcess, Msg0} -> Msg0 after 1500 -> ?assert(false) end,
+            Message1 = receive {AsyncProcess, Msg1} -> Msg1 after 1500 -> ?assert(false) end,
+            Message2 = receive {AsyncProcess, Msg2} -> Msg2 after 1500 -> ?assert(false) end,
+            ?assertEqual(sleep_2, Message2),
+            case Message0 of
+                sleep_1 ->
+                    ?assertMatch({pgsql, Conn1, {notification, _PID, <<"test_channel">>, <<>>}}, Message1);
+                {pgsql, Conn1, {notification, _PID, <<"test_channel">>, <<>>}} ->
+                    ?assertEqual(sleep_1, Message1)
+            end
+        end)
+        },
+        {"Subscribe for notifications",
+        ?_test(begin
+            pgsql_connection:subscribe(self(), Conn1),
+            AsyncProcess ! {set_test_process, self()},
+            R = pgsql_connection:simple_query("NOTIFY test_channel, '1'", Conn2),
+            ?assertEqual({notify, []}, R),
+            receive {AsyncProcess, {pgsql, Conn1, {notification, _PID1, <<"test_channel">>, <<"1">>}}} -> ok
+            after 1000 -> ?assert(false)
+            end,
+            receive {pgsql, Conn1, {notification, _PID2, <<"test_channel">>, <<"1">>}} -> ok
+            after 1000 -> ?assert(false)
+            end,
+            pgsql_connection:unsubscribe(self(), Conn1),
+            R = pgsql_connection:simple_query("NOTIFY test_channel, '2'", Conn2),
+            ?assertEqual({notify, []}, R),
+            receive {AsyncProcess, {pgsql, Conn1, {notification, _PID3, <<"test_channel">>, <<"2">>}}} -> ok
+            after 1000 -> ?assert(false)
+            end,
+            receive {pgsql, Conn1, {notification, _PID4, <<"test_channel">>, <<"2">>}} -> ?assert(false)
+            after 1000 -> ok
+            end
+        end)
+        }
+    ]
+    end}.
+
+notice_test_() ->
+    {setup,
+    fun() ->
+        {ok, SupPid} = pgsql_connection_sup:start_link(),
+        NoticeProcess = spawn_link(fun() ->
+            async_process_loop(undefined)
+        end),
+        Conn1 = pgsql_connection:open([{database, "test"}, {user, "test"}, {async, NoticeProcess}]),
+        {SupPid, Conn1, NoticeProcess}
+    end,
+    fun({SupPid, Conn1, NoticeProcess}) ->
+        pgsql_connection:close(Conn1),
+        unlink(NoticeProcess),
+        exit(NoticeProcess, normal),
+        kill_sup(SupPid)
+    end,
+    fun({_SupPid, Conn1, AsyncProcess}) ->
+    [
+        ?_test(begin
+            AsyncProcess ! {set_test_process, self()},
+            R = pgsql_connection:simple_query("DO $$ BEGIN RAISE NOTICE 'test notice'; END $$;", Conn1),
+            ?assertEqual({'do', []}, R),
+            receive {AsyncProcess, NoticeMessage} ->
+                ?assertMatch({pgsql, Conn1, {notice, _Fields}}, NoticeMessage),
+                {pgsql, Conn1, {notice, Fields}} = NoticeMessage,
+                ?assertEqual({severity, <<"NOTICE">>}, lists:keyfind(severity, 1, Fields)),
+                ?assertEqual({message, <<"test notice">>}, lists:keyfind(message, 1, Fields))
+            after 1000 -> ?assert(false)
+            end
+        end)
+    ]
+    end}.
+
