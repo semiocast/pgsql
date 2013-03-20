@@ -1158,6 +1158,9 @@ process_active_data(<<Code:8/integer, Size:32/integer, Tail/binary>>, #state{soc
         {{ok, #notice_response{} = Notice}, Rest} ->
             broadcast_to_subscribers(Notice, sync, Subscribers),
             process_active_data(Rest, State0);
+        {{ok, #parameter_status{name = Name, value = Value}}, Rest} ->
+            State1 = handle_parameter(Name, Value, sync, State0),
+            process_active_data(Rest, State1);
         {{ok, Message}, Rest} ->
             error_logger:warning_msg("Unexpected asynchronous message\n~p\n", [Message]),
             process_active_data(Rest, State0);
