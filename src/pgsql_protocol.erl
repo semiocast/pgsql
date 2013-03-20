@@ -737,13 +737,18 @@ decode_array_bin_aux(ElementOID, <<Size:32/signed-integer, Next/binary>>, OIDMap
 
 
 decode_numeric_bin(<<0:16/unsigned, 0:16, 16#C000:16/unsigned, 0:16/unsigned>>) -> 'NaN';
-decode_numeric_bin(<<Len:16/unsigned, Weight:16, Sign:16/unsigned, _DScale:16/unsigned, Tail/binary>>) ->
+decode_numeric_bin(<<Len:16/unsigned, Weight:16/signed, Sign:16/unsigned, DScale:16/unsigned, Tail/binary>>) ->
     Len = byte_size(Tail) div 2,
     {ValueInt, DecShift} = decode_numeric_bin0(Tail, Weight, 0),
     ValueDec = decode_numeric_bin_scale(ValueInt, DecShift),
-    case Sign of
+    SignedDec = case Sign of
         16#0000 -> ValueDec;
         16#4000 -> -ValueDec
+    end,
+    % Convert to float if there are digits after the decimal point.
+    if
+        DScale > 0 andalso is_integer(SignedDec) -> SignedDec * 1.0;
+        true -> SignedDec
     end.
 
 -define(NBASE, 10000).
@@ -756,7 +761,10 @@ decode_numeric_bin0(<<Digit:16, Tail/binary>>, Weight, Acc) when Digit >= 0 anda
 decode_numeric_bin_scale(Value, -1) -> Value;
 decode_numeric_bin_scale(Value, DecShift) when DecShift < 0 ->
     NewValue = Value / ?NBASE,
-    decode_numeric_bin_scale(NewValue, DecShift + 1).
+    decode_numeric_bin_scale(NewValue, DecShift + 1);
+decode_numeric_bin_scale(Value, DecShift) when DecShift >= 0 ->
+    NewValue = Value * ?NBASE,
+    decode_numeric_bin_scale(NewValue, DecShift - 1).
 
 decode_oid(Oid, OIDMap) ->
     case gb_trees:lookup(Oid, OIDMap) of
