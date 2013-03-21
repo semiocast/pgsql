@@ -1,4 +1,4 @@
-Erlang PostgreSQL Driver
+Erlang PostgreSQL Driver [![Build Status](https://travis-ci.org/semiocast/pgsql.png)](https://travis-ci.org/semiocast/pgsql)
 ========================
 
 Introduction
