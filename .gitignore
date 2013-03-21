@@ -1,3 +1,5 @@
 .eunit
 ebin
-src/pgsql.app.src
+.DS_Store
+.persistent_state
+target
