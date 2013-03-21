@@ -1011,8 +1011,11 @@ notice_test_() ->
     [
         ?_test(begin
             AsyncProcess ! {set_test_process, self()},
-            R = pgsql_connection:simple_query("DO $$ BEGIN RAISE NOTICE 'test notice'; END $$;", Conn1),
-            ?assertEqual({'do', []}, R),
+            % Set client_min_messages to NOTICE. This is the default, but some environment (e.g. Travis) may have it configured otherwise.
+            R1 = pgsql_connection:simple_query("SET client_min_messages=NOTICE;", Conn1),
+            ?assertEqual({'set', []}, R1),
+            R2 = pgsql_connection:simple_query("DO $$ BEGIN RAISE NOTICE 'test notice'; END $$;", Conn1),
+            ?assertEqual({'do', []}, R2),
             receive {AsyncProcess, NoticeMessage} ->
                 ?assertMatch({pgsql, Conn1, {notice, _Fields}}, NoticeMessage),
                 {pgsql, Conn1, {notice, Fields}} = NoticeMessage,
