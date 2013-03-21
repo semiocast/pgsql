@@ -9,4 +9,5 @@ otp_release:
    - R14B02
 services: postgresql
 before_script:
-  - psql -c 'CREATE ROLE test LOGIN; ALTER USER test WITH SUPERUSER; CREATE DATABASE test WITH OWNER=test;' -U postgres
+  - psql -c 'CREATE ROLE test LOGIN; ALTER USER test WITH SUPERUSER;' -U postgres
+  - psql -c 'CREATE DATABASE test WITH OWNER=test;' -U postgres
