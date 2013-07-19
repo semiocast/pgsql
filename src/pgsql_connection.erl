@@ -72,6 +72,11 @@
     terminate/2
     ]).
 
+-export_type([
+    row/0,
+    rows/0,
+    result_tuple/0]).
+
 %%--------------------------------------------------------------------
 %% Default settings
 %%--------------------------------------------------------------------
@@ -100,7 +105,7 @@
     {'begin' | commit | 'do' | listen | notify | rollback | set | {declare, cursor} | {lock, table}, []}
     | {{insert, integer(), integer()}, rows()}
     | {{copy | delete | fetch | move | select | update, integer()}, rows()}
-    | {{alter | create | drop, atom()}, []}.
+    | {{alter | create | drop, atom()} | {start, transaction}, []}.
 
 % A gen_tcp or SSL socket.
 -type prim_socket() :: port() | tuple().
