@@ -602,6 +602,18 @@ pgsql_setup_authenticate_cleartext_password(Socket, #state{options = Options} = 
     Password = proplists:get_value(password, Options, ?DEFAULT_PASSWORD),
     pgsql_setup_authenticate_password(Socket, Password, State0).
 
+-ifndef(old_hash).
+pgsql_setup_authenticate_md5_password(Socket, Salt, #state{options = Options} = State0) ->
+    User = proplists:get_value(user, Options, ?DEFAULT_USER),
+    Password = proplists:get_value(password, Options, ?DEFAULT_PASSWORD),
+    % concat('md5', md5(concat(md5(concat(password, username)), random-salt)))
+    <<MD51Int:128>> = crypto:hash(md5, [Password, User]),
+    MD51Hex = io_lib:format("~32.16.0b", [MD51Int]),
+    <<MD52Int:128>> = crypto:hash(md5, [MD51Hex, Salt]),
+    MD52Hex = io_lib:format("~32.16.0b", [MD52Int]),
+    MD5ChallengeResponse = ["md5", MD52Hex],
+    pgsql_setup_authenticate_password(Socket, MD5ChallengeResponse, State0).
+-else.
 pgsql_setup_authenticate_md5_password(Socket, Salt, #state{options = Options} = State0) ->
     User = proplists:get_value(user, Options, ?DEFAULT_USER),
     Password = proplists:get_value(password, Options, ?DEFAULT_PASSWORD),
@@ -612,6 +624,7 @@ pgsql_setup_authenticate_md5_password(Socket, Salt, #state{options = Options} = 
     MD52Hex = io_lib:format("~32.16.0b", [MD52Int]),
     MD5ChallengeResponse = ["md5", MD52Hex],
     pgsql_setup_authenticate_password(Socket, MD5ChallengeResponse, State0).
+-endif.
 
 pgsql_setup_authenticate_password({SockModule, Sock} = Socket, Password, #state{subscribers = Subscribers} = State0) ->
     Message = pgsql_protocol:encode_password_message(Password),
