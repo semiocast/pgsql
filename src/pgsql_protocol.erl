@@ -736,9 +736,8 @@ decode_array_bin_aux(ElementOID, <<Size:32/signed-integer, Next/binary>>, OIDMap
     Value = decode_value_bin(ElementOID, ValueBin, OIDMap, IntegerDateTimes),
     decode_array_bin_aux(ElementOID, Rest, OIDMap, IntegerDateTimes, [Value | Acc]).
 
-
-decode_numeric_bin(<<0:16/unsigned, 0:16, 16#C000:16/unsigned, 0:16/unsigned>>) -> 'NaN';
-decode_numeric_bin(<<Len:16/unsigned, Weight:16/signed, Sign:16/unsigned, DScale:16/unsigned, Tail/binary>>) ->
+decode_numeric_bin(<<0:16/unsigned, _Weight:16, 16#C000:16/unsigned, 0:16/unsigned>>) -> 'NaN';
+decode_numeric_bin(<<Len:16/unsigned, Weight:16/signed, Sign:16/unsigned, DScale:16/unsigned, Tail/binary>>) when Sign =:= 16#0000 orelse Sign =:= 16#4000 ->
     Len = byte_size(Tail) div 2,
     {ValueInt, DecShift} = decode_numeric_bin0(Tail, Weight, 0),
     ValueDec = decode_numeric_bin_scale(ValueInt, DecShift),
