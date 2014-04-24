@@ -1,3 +1,4 @@
+%% -*- coding: utf-8 -*-
 -module(pgsql_error).
 
 -vsn("1").
