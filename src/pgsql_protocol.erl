@@ -1,7 +1,7 @@
 %%% @doc Module for packet encoding and decoding.
 %%%
 -module(pgsql_protocol).
--vsn("2").
+-vsn("3").
 % -include_lib("commonlib/include/compile_time.hrl").
 -include("pgsql_internal.hrl").
 
@@ -177,8 +177,47 @@ encode_parameter({Hour, Min, Sec}, IntegerDateTimes) when Hour >= 0 andalso Hour
     encode_parameter(lists:flatten(io_lib:format("~2.10.0B:~2.10.0B:~2.10.0B", [Hour, Min, Sec])), IntegerDateTimes);
 encode_parameter({Year, Month, Day}, IntegerDateTimes) when Month > 0 andalso Month =< 12 andalso Day > 0 andalso Day =< 31 ->
     encode_parameter(lists:flatten(io_lib:format("~4.10.0B-~2.10.0B-~2.10.0B", [Year, Month, Day])), IntegerDateTimes);
+encode_parameter({point, P}, _IntegerDateTimes) ->
+    Binary = encode_point_text(P),
+    Size = byte_size(Binary),
+    {text, <<Size:32/integer, Binary/binary>>};
+encode_parameter({lseg, P1, P2}, _IntegerDateTimes) ->
+    P1Bin = encode_point_text(P1),
+    P2Bin = encode_point_text(P2),
+    Binary = <<$[, P1Bin/binary, $,, P2Bin/binary, $]>>,
+    Size = byte_size(Binary),
+    {text, <<Size:32/integer, Binary/binary>>};
+encode_parameter({box, P1, P2}, _IntegerDateTimes) ->
+    P1Bin = encode_point_text(P1),
+    P2Bin = encode_point_text(P2),
+    Binary = <<$(, P1Bin/binary, $,, P2Bin/binary, $)>>,
+    Size = byte_size(Binary),
+    {text, <<Size:32/integer, Binary/binary>>};
+encode_parameter({path, open, [_|_]=PList}, _IntegerDateTimes) ->
+    Binary = encode_points_text($[, $], PList),
+    Size = byte_size(Binary),
+    {text, <<Size:32/integer, Binary/binary>>};
+encode_parameter({path, closed, [_|_]=PList}, _IntegerDateTimes) ->
+    Binary = encode_points_text($(, $), PList),
+    Size = byte_size(Binary),
+    {text, <<Size:32/integer, Binary/binary>>};
+encode_parameter({polygon, [_|_]=PList}, _IntegerDateTimes) ->
+    Binary = encode_points_text($(, $), PList),
+    Size = byte_size(Binary),
+    {text, <<Size:32/integer, Binary/binary>>};
 encode_parameter(Value, _IntegerDateTimes) ->
     throw({badarg, Value}).
+
+encode_point_text({X, Y}) ->
+    XBin = list_to_binary(case is_integer(X) of true -> integer_to_list(X); false -> float_to_list(X) end),
+    YBin = list_to_binary(case is_integer(Y) of true -> integer_to_list(Y); false -> float_to_list(Y) end),
+    <<$(, XBin/binary, $,, YBin/binary, $)>>.
+
+encode_points_text(Prefix, Suffix, [PHead|PTail]) ->
+    PHeadBin = encode_point_text(PHead),
+    PTailBin = list_to_binary([begin PBin = encode_point_text(P), <<$,, PBin/binary>> end || P <- PTail]),
+    <<Prefix, PHeadBin/binary, PTailBin/binary, Suffix>>.
+
 
 %%--------------------------------------------------------------------
 %% @doc Encode a describe message.
@@ -610,6 +649,28 @@ decode_value_text(?TIMESTAMPTZOID, Value, _OIDMap) ->
             list_to_integer(SecsStr)
     end,
     {{Year, Month, Day}, {Hour, Min, Secs}};
+decode_value_text(?POINTOID, Value, _OIDMap) ->
+    {P, []} = decode_point_text(binary_to_list(Value)),
+    {point, P};
+decode_value_text(?LSEGOID, Value, _OIDMap) ->
+    [$[|P1Str] = binary_to_list(Value),
+    {P1, [$,|P2Str]} = decode_point_text(P1Str),
+    {P2, "]"} = decode_point_text(P2Str),
+    {lseg, P1, P2};
+decode_value_text(?BOXOID, Value, _OIDMap) ->
+    P1Str = binary_to_list(Value),
+    {P1, [$,|P2Str]} = decode_point_text(P1Str),
+    {P2, []} = decode_point_text(P2Str),
+    {box, P1, P2};
+decode_value_text(?PATHOID, <<$[,_/binary>> = Value, _OIDMap) ->
+    {Points, []} = decode_points_text($[, $], binary_to_list(Value)),
+    {path, open, Points};
+decode_value_text(?PATHOID, <<$(,_/binary>> = Value, _OIDMap) ->
+    {Points, []} = decode_points_text($(, $), binary_to_list(Value)),
+    {path, closed, Points};
+decode_value_text(?POLYGONOID, Value, _OIDMap) ->
+    {Points, []} = decode_points_text($(, $), binary_to_list(Value)),
+    {polygon, Points};
 decode_value_text(?VOIDOID, _Value, _OIDMap) -> null;
 decode_value_text(TypeOID, Value, _OIDMap) when TypeOID =:= ?TEXTOID
             orelse TypeOID =:= ?UUIDOID
@@ -628,6 +689,33 @@ decode_value_text(TypeOID, Value, OIDMap) ->
                 _ -> {Type, Value}
             end
     end.
+
+decode_point_text(Str) ->
+    {X, AfterX} =
+        case io_lib:fread("(~f,", Str) of
+            {ok, [X0], AfterX0} -> {X0, AfterX0};
+            {error, {fread, float}} ->
+                {ok, [X0], AfterX0} = io_lib:fread("(~d,", Str),
+                {X0 * 1.0, AfterX0}
+        end,
+    {Y, AfterY} =
+        case io_lib:fread("~f)", AfterX) of
+            {ok, [Y0], AfterY0} -> {Y0, AfterY0};
+            {error, {fread, float}} ->
+                {ok, [Y0], AfterY0} = io_lib:fread("~d)", AfterX),
+                {Y0 * 1.0, AfterY0}
+        end,
+    {{X, Y}, AfterY}.
+
+decode_points_text(Prefix, Suffix, PStr) ->
+    decode_points_text_aux(Prefix, Suffix, PStr, []).
+
+decode_points_text_aux(Prefix, Suffix, [Before|PStr], PAcc) when Before =:= $, orelse Before =:= Prefix ->
+    {P, AfterP} = decode_point_text(PStr),
+    decode_points_text_aux(Prefix, Suffix, AfterP, [P|PAcc]);
+decode_points_text_aux(_, Suffix, [Suffix|After], PAcc) ->
+    {lists:reverse(PAcc), After}.
+
 
 type_to_oid(Type, OIDMap) ->
     List = gb_trees:to_list(OIDMap),
@@ -690,6 +778,12 @@ decode_value_bin(?TIMESTAMPTZOID, <<16#7FFFFFFFFFFFFFFF:64/signed-integer>>, _OI
 decode_value_bin(?TIMESTAMPTZOID, <<-16#8000000000000000:64/signed-integer>>, _OIDMap, true) -> '-infinity';
 decode_value_bin(?TIMESTAMPTZOID, <<Timestamp:64/signed-integer>>, _OIDMap, true) -> decode_timestamp_int(Timestamp);
 decode_value_bin(?NUMERICOID, NumericBin, _OIDMap, _IntegerDateTimes) -> decode_numeric_bin(NumericBin);
+decode_value_bin(?POINTOID, <<X:64/float, Y:64/float>>, _OIDMap, _IntegerDateTimes) -> {point, {X, Y}};
+decode_value_bin(?LSEGOID, <<P1X:64/float, P1Y:64/float, P2X:64/float, P2Y:64/float>>, _OIDMap, _IntegerDateTimes) -> {lseg, {P1X, P1Y}, {P2X, P2Y}};
+decode_value_bin(?BOXOID, <<P1X:64/float, P1Y:64/float, P2X:64/float, P2Y:64/float>>, _OIDMap, _IntegerDateTimes) -> {box, {P1X, P1Y}, {P2X, P2Y}};
+decode_value_bin(?PATHOID, <<1:8/unsigned-integer, PointsBin/binary>>, _OIDMap, _IntegerDateTimes) -> {path, closed, decode_points_bin(PointsBin)};
+decode_value_bin(?PATHOID, <<0:8/unsigned-integer, PointsBin/binary>>, _OIDMap, _IntegerDateTimes) -> {path, open, decode_points_bin(PointsBin)};
+decode_value_bin(?POLYGONOID, Points, _OIDMap, _IntegerDateTimes) -> {polygon, decode_points_bin(Points)};
 decode_value_bin(?VOIDOID, <<>>, _OIDMap, _IntegerDateTimes) -> null;
 decode_value_bin(TypeOID, Value, OIDMap, IntegerDateTimes) ->
     Type = decode_oid(TypeOID, OIDMap),
@@ -701,6 +795,14 @@ decode_value_bin(TypeOID, Value, OIDMap, IntegerDateTimes) ->
                 _ -> {Type, Value}
             end
     end.
+
+decode_points_bin(<<N:32/unsigned-integer, Points/binary>>) ->
+    decode_points_bin(N, Points, []).
+
+decode_points_bin(0, <<>>, Acc) ->
+    lists:reverse(Acc);
+decode_points_bin(N, <<PX:64/float, PY:64/float, Tail/binary>>, Acc) when N > 0 ->
+    decode_points_bin(N - 1, Tail, [{PX, PY}|Acc]).
 
 decode_array_bin(<<Dimensions:32/signed-integer, _Flags:32/signed-integer, ElementOID:32/signed-integer, Remaining/binary>>, OIDMap, IntegerDateTimes) ->
     {RemainingData, DimsInfo} = lists:foldl(fun(_Pos, {Bin, Acc}) ->
