@@ -304,6 +304,177 @@ array_types_test_() ->
         end
     }.
 
+geometric_types_test_() ->
+    [{setup,
+      fun() ->
+              {ok, SupPid} = pgsql_connection_sup:start_link(),
+              Conn = pgsql_connection:open("test", "test"),
+              {SupPid, Conn}
+      end,
+      fun({SupPid, Conn}) ->
+              pgsql_connection:close(Conn),
+              kill_sup(SupPid)
+      end,
+      fun({_SupPid, Conn}) ->
+              [
+               ?_assertEqual({{select,1},[{{point,{2.0,-3.0}}}]}, pgsql_connection:simple_query("select '(2,-3)'::point", Conn)),
+               ?_assertEqual({{select,1},[{{point,{2.0,1.45648}}}]}, pgsql_connection:simple_query("select '(2,1.45648)'::point", Conn)),
+               ?_assertEqual({{select,1},[{{point,{-3.154548,-3.0}}}]}, pgsql_connection:simple_query("select '(-3.154548,-3)'::point", Conn)),
+               ?_assertEqual({{select,1},[{{point,{-3.154548,1.45648}}}]}, pgsql_connection:simple_query("select '(-3.154548,1.45648)'::point", Conn)),
+               ?_assertEqual({{select,1},[{{point,{2.0,-3.0}}}]}, pgsql_connection:extended_query("select '(2,-3)'::point", [], Conn)),
+               ?_assertEqual({{select,1},[{{point,{2.0,1.45648}}}]}, pgsql_connection:extended_query("select '(2,1.45648)'::point", [], Conn)),
+               ?_assertEqual({{select,1},[{{point,{-3.154548,-3.0}}}]}, pgsql_connection:extended_query("select '(-3.154548,-3)'::point", [], Conn)),
+               ?_assertEqual({{select,1},[{{point,{-3.154548,1.45648}}}]}, pgsql_connection:extended_query("select '(-3.154548,1.45648)'::point", [], Conn)),
+
+               ?_assertEqual({{select,1},[{{lseg,{2.0,1.45648},{-3.154548,-3.0}}}]}, pgsql_connection:simple_query("select '[(2,1.45648),(-3.154548,-3)]'::lseg", Conn)),
+               ?_assertEqual({{select,1},[{{lseg,{2.0,1.45648},{-3.154548,-3.0}}}]}, pgsql_connection:extended_query("select '[(2,1.45648),(-3.154548,-3))'::lseg", [], Conn)),
+
+               ?_assertEqual({{select,1},[{{box,{2.0,1.45648},{-3.154548,-3.0}}}]}, pgsql_connection:simple_query("select '((-3.154548,-3),(2,1.45648))'::box", Conn)),
+               ?_assertEqual({{select,1},[{{box,{2.0,1.45648},{-3.154548,-3.0}}}]}, pgsql_connection:extended_query("select '((-3.154548,-3),(2,1.45648))'::box", [], Conn)),
+
+               ?_assertEqual({{select,1},[{{polygon,[{-3.154548,-3.0},{2.0,1.45648}]}}]}, pgsql_connection:simple_query("select '((-3.154548,-3),(2,1.45648))'::polygon", Conn)),
+               ?_assertEqual({{select,1},[{{polygon,[{-3.154548,-3.0},{2.0,1.45648}]}}]}, pgsql_connection:extended_query("select '((-3.154548,-3),(2,1.45648))'::polygon", [], Conn)),
+
+               ?_assertEqual({{select,1},[{{path,closed,[{-3.154548,-3.0},{2.0,1.45648}]}}]}, pgsql_connection:simple_query("select '((-3.154548,-3),(2,1.45648))'::path", Conn)),
+               ?_assertEqual({{select,1},[{{path,closed,[{-3.154548,-3.0},{2.0,1.45648}]}}]}, pgsql_connection:extended_query("select '((-3.154548,-3),(2,1.45648))'::path", [], Conn)),
+
+               ?_assertEqual({{select,1},[{{path,open,[{-3.154548,-3.0},{2.0,1.45648}]}}]}, pgsql_connection:simple_query("select '[(-3.154548,-3),(2,1.45648)]'::path", Conn)),
+               ?_assertEqual({{select,1},[{{path,open,[{-3.154548,-3.0},{2.0,1.45648}]}}]}, pgsql_connection:extended_query("select '[(-3.154548,-3),(2,1.45648)]'::path", [], Conn)),
+
+               {setup,
+                fun() ->
+                        {updated, 1} = pgsql_connection:sql_query("create temporary table tmp (id integer primary key, mypoint point, mylseg lseg, mybox box, mypath path, mypolygon polygon)", Conn),
+                        ok
+                end,
+                fun(_) ->
+                        ok
+                end,
+                fun(_) ->
+                        [
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{1, {point,{2.0,3.0}}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mypoint) values($1, $2) returning id, mypoint", [1, {point,{2,3}}], Conn)
+                           ),
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{2, {point,{-10.0,3.254}}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mypoint) values($1, $2) returning id, mypoint", [2, {point,{-10,3.254}}], Conn)
+                           ),
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{3, {point,{-10.0,-3.5015}}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mypoint) values($1, $2) returning id, mypoint", [3, {point,{-10,-3.5015}}], Conn)
+                           ),
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{4, {point,{2.25,-3.59}}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mypoint) values($1, $2) returning id, mypoint", [4, {point,{2.25,-3.59}}], Conn)
+                           ),
+
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{101, {lseg,{2.54,3.14},{-10.0,-3.5015}}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mylseg) values($1, $2) returning id, mylseg", [101, {lseg,{2.54,3.14},{-10,-3.5015}}], Conn)
+                           ),
+
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{201, {box,{2.0,3.0},{-10.14,-3.5015}}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mybox) values($1, $2) returning id, mybox", [201, {box,{2,3},{-10.14,-3.5015}}], Conn)
+                           ),
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{202, {box,{2.0,3.0},{-10.14,-3.5015}}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mybox) values($1, $2) returning id, mybox", [202, {box,{-10.14,3},{2,-3.5015}}], Conn)
+                           ),
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{203, {box,{2.0,3.0},{-10.14,-3.5015}}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mybox) values($1, $2) returning id, mybox", [203, {box,{2,-3.5015},{-10.14,3}}], Conn)
+                           ),
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{204, {box,{2.0,3.0},{-10.14,-3.5015}}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mybox) values($1, $2) returning id, mybox", [204, {box,{-10.14,-3.5015},{2,3}}], Conn)
+                           ),
+
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{301, {path,open,[{-10.85,-3.5015}]}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mypath) values($1, $2) returning id, mypath", [301, {path,open,[{-10.85,-3.5015}]}], Conn)
+                           ),
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{302, {path,open,[{-10.85,-3.5015},{2.0,3.0}]}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mypath) values($1, $2) returning id, mypath", [302, {path,open,[{-10.85,-3.5015},{2,3}]}], Conn)
+                           ),
+
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{351, {path,closed,[{-10.85,-3.5015}]}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mypath) values($1, $2) returning id, mypath", [351, {path,closed,[{-10.85,-3.5015}]}], Conn)
+                           ),
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{352, {path,closed,[{-10.85,-3.5015},{2.0,3.0}]}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mypath) values($1, $2) returning id, mypath", [352, {path,closed,[{-10.85,-3.5015},{2,3}]}], Conn)
+                           ),
+
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{401, {polygon,[{-10.85,-3.5015}]}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mypolygon) values($1, $2) returning id, mypolygon", [401, {polygon,[{-10.85,-3.5015}]}], Conn)
+                           ),
+                         ?_assertEqual(
+                            {{insert, 0, 1}, [{402, {polygon,[{-10.85,-3.5015},{2.0,3.0}]}}]},
+                            pgsql_connection:extended_query("insert into tmp(id, mypolygon) values($1, $2) returning id, mypolygon", [402, {polygon,[{-10.85,-3.5015},{2,3}]}], Conn)
+                           )
+                        ]
+                end
+               }
+              ]
+      end
+     },
+     {setup,
+      fun() ->
+              {ok, SupPid} = pgsql_connection_sup:start_link(),
+              Conn = pgsql_connection:open("test", "test"),
+              {updated, 1} = pgsql_connection:sql_query("create temporary table tmp (id integer primary key, mypath path)", Conn),
+              {SupPid, Conn}
+      end,
+      fun({SupPid, Conn}) ->
+              pgsql_connection:close(Conn),
+              kill_sup(SupPid)
+      end,
+      fun({_SupPid, Conn}) ->
+              ?_assertMatch(
+                  {error, {badarg, {path,open,[]}}},
+                  pgsql_connection:extended_query("insert into tmp(id, mypath) values($1, $2) returning id, mypath", [300, {path,open,[]}], Conn)
+              )
+      end},
+     {setup,
+      fun() ->
+              {ok, SupPid} = pgsql_connection_sup:start_link(),
+              Conn = pgsql_connection:open("test", "test"),
+              {updated, 1} = pgsql_connection:sql_query("create temporary table tmp (id integer primary key, mypath path)", Conn),
+              {SupPid, Conn}
+      end,
+      fun({SupPid, Conn}) ->
+              pgsql_connection:close(Conn),
+              kill_sup(SupPid)
+      end,
+      fun({_SupPid, Conn}) ->
+              ?_assertMatch(
+                  {error, {badarg, {path,closed,[]}}},
+                  pgsql_connection:extended_query("insert into tmp(id, mypath) values($1, $2) returning id, mypath", [350, {path,closed,[]}], Conn)
+              )
+      end},
+     {setup,
+      fun() ->
+              {ok, SupPid} = pgsql_connection_sup:start_link(),
+              Conn = pgsql_connection:open("test", "test"),
+              {updated, 1} = pgsql_connection:sql_query("create temporary table tmp (id integer primary key, mypolygon polygon)", Conn),
+              {SupPid, Conn}
+      end,
+      fun({SupPid, Conn}) ->
+              pgsql_connection:close(Conn),
+              kill_sup(SupPid)
+      end,
+      fun({_SupPid, Conn}) ->
+              ?_assertMatch(
+                  {error, {badarg, {polygon, []}}},
+                  pgsql_connection:extended_query("insert into tmp(id, mypolygon) values($1, $2) returning id, mypolygon", [400, {polygon,[]}], Conn)
+              )
+      end}
+    ].
+
 float_types_test_() ->
     {setup,
     fun() ->
