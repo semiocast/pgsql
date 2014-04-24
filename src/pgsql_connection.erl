@@ -143,7 +143,7 @@
       backend_procid    :: integer(),
       backend_secret    :: integer(),
       integer_datetimes :: boolean(),
-      oidmap            :: gb_tree(),
+      oidmap            :: gb_trees:tree(pos_integer(), atom()),
       current           :: {tuple(), reference(), from()} | undefined | {tuple(), from()},
       pending           :: [{tuple(), reference(), from()}] | [{tuple(), from()}],
       statement_timeout :: non_neg_integer()

@@ -563,7 +563,7 @@ decode_string(Binary) ->
 %%--------------------------------------------------------------------
 %% @doc Decode a row format.
 %%
--spec decode_row([#row_description_field{}], [binary()], gb_tree(), boolean()) -> tuple().
+-spec decode_row([#row_description_field{}], [binary()], gb_trees:tree(pos_integer(), atom()), boolean()) -> tuple().
 decode_row(Descs, Values, OIDMap, IntegerDateTimes) ->
     decode_row0(Descs, Values, OIDMap, IntegerDateTimes, []).
 
