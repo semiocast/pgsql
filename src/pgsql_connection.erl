@@ -798,29 +798,37 @@ pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, AsyncT, #
         MaxRowsStep > 0 -> pgsql_protocol:encode_flush_message();
         true -> pgsql_protocol:encode_sync_message()
     end,
-    SinglePacket = case Mode of
-        batch ->
-            BatchMessages = [[pgsql_protocol:encode_bind_message("", "", ParametersBatch, IntegerDateTimes), DescribeMessage, ExecuteMessage, SyncOrFlushMessage] || ParametersBatch <- Parameters],
-            [ParseMessage, BatchMessages];
-        _ ->
-            BindMessage = pgsql_protocol:encode_bind_message("", "", Parameters, IntegerDateTimes),
-            [ParseMessage, BindMessage, DescribeMessage, ExecuteMessage, SyncOrFlushMessage]
+    SinglePacket = try
+        case Mode of
+            batch ->
+                BatchMessages = [[pgsql_protocol:encode_bind_message("", "", ParametersBatch, IntegerDateTimes), DescribeMessage, ExecuteMessage, SyncOrFlushMessage] || ParametersBatch <- Parameters],
+                [ParseMessage, BatchMessages];
+            _ ->
+                BindMessage = pgsql_protocol:encode_bind_message("", "", Parameters, IntegerDateTimes),
+                [ParseMessage, BindMessage, DescribeMessage, ExecuteMessage, SyncOrFlushMessage]
+        end
+    catch throw:Exception ->
+        {error, Exception}
     end,
-    case SockModule:send(Sock, SinglePacket) of
-        ok ->
-            if
-                Mode =:= batch ->
-                    {_, ResultRL, FinalState} = lists:foldl(fun(_ParametersBatch, {LoopState, AccResults, AccState}) ->
-                        {Result, AccState1} = pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, sync, AccState),
-                        {bind_complete, [Result | AccResults], AccState1}
-                    end, {parse_complete, [], State}, Parameters),
-                    Result = lists:reverse(ResultRL),
-                    return_async(Result, AsyncT, FinalState);
-                true ->
-                    pgsql_extended_query_receive_loop(parse_complete, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State)
-            end;
-        {error, _} = SendSinglePacketError ->
-            return_async(SendSinglePacketError, AsyncT, State)
+    if is_tuple(SinglePacket) ->
+            return_async(SinglePacket, AsyncT, State);
+        true ->
+            case SockModule:send(Sock, SinglePacket) of
+                ok ->
+                    if
+                        Mode =:= batch ->
+                            {_, ResultRL, FinalState} = lists:foldl(fun(_ParametersBatch, {LoopState, AccResults, AccState}) ->
+                                        {Result, AccState1} = pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, sync, AccState),
+                                        {bind_complete, [Result | AccResults], AccState1}
+                                end, {parse_complete, [], State}, Parameters),
+                            Result = lists:reverse(ResultRL),
+                            return_async(Result, AsyncT, FinalState);
+                        true ->
+                            pgsql_extended_query_receive_loop(parse_complete, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State)
+                    end;
+                {error, _} = SendSinglePacketError ->
+                    return_async(SendSinglePacketError, AsyncT, State)
+            end
     end.
 
 pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock} = Socket, subscribers = Subscribers} = State0) ->

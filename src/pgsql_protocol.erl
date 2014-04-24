@@ -176,8 +176,9 @@ encode_parameter({{Year, Month, Day}, {Hour, Min, Sec}}, IntegerDateTimes) ->
 encode_parameter({Hour, Min, Sec}, IntegerDateTimes) when Hour >= 0 andalso Hour < 24 andalso Min >= 0 andalso Min < 60 andalso Sec > 0 andalso Sec =< 60 ->
     encode_parameter(lists:flatten(io_lib:format("~2.10.0B:~2.10.0B:~2.10.0B", [Hour, Min, Sec])), IntegerDateTimes);
 encode_parameter({Year, Month, Day}, IntegerDateTimes) when Month > 0 andalso Month =< 12 andalso Day > 0 andalso Day =< 31 ->
-    encode_parameter(lists:flatten(io_lib:format("~4.10.0B-~2.10.0B-~2.10.0B", [Year, Month, Day])), IntegerDateTimes).
-
+    encode_parameter(lists:flatten(io_lib:format("~4.10.0B-~2.10.0B-~2.10.0B", [Year, Month, Day])), IntegerDateTimes);
+encode_parameter(Value, _IntegerDateTimes) ->
+    throw({badarg, Value}).
 
 %%--------------------------------------------------------------------
 %% @doc Encode a describe message.

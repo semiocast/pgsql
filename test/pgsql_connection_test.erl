@@ -774,6 +774,30 @@ custom_enum_native_test_() ->
     ]
     end}.
 
+invalid_query_test_() ->
+    {setup,
+        fun() ->
+                {ok, SupPid} = pgsql_connection_sup:start_link(),
+                Conn = pgsql_connection:open("test", "test"),
+                {{create, table}, []} = pgsql_connection:simple_query("CREATE TEMPORARY TABLE tmp(id integer primary key, other text)", Conn),
+                {SupPid, Conn}
+        end,
+        fun({SupPid, Conn}) ->
+                pgsql_connection:close(Conn),
+                kill_sup(SupPid)
+        end,
+        fun({_SupPid, Conn}) ->
+                [
+                    ?_test(begin
+                                ?assertEqual({error, {badarg, toto}}, pgsql_connection:extended_query("insert into tmp(id, other) values (1, $1)", [toto], Conn)),
+                                % connection still usable
+                                R = pgsql_connection:extended_query("insert into tmp(id, other) values (1, $1)", ["toto"], Conn),
+                                ?assertEqual({{insert, 0, 1}, []}, R)
+                        end)
+                ]
+        end
+    }.
+
 cancel_test_() ->
     {setup,
     fun() ->
