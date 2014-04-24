@@ -75,7 +75,8 @@
 -export_type([
     row/0,
     rows/0,
-    result_tuple/0]).
+    result_tuple/0,
+    pgsql_connection/0]).
 
 %%--------------------------------------------------------------------
 %% Default settings
