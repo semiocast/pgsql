@@ -66,6 +66,100 @@ open_close_test_() ->
         end)}
     ]}.
 
+reconnect_proxy_loop() ->
+    {ok, LSock} = gen_tcp:listen(35432, [{active, true}, binary, {reuseaddr, true}]),    
+    reconnect_proxy_loop0(LSock, undefined, undefined).
+
+reconnect_proxy_loop0(LSock, undefined, undefined) ->
+    {ok, CSock} = gen_tcp:accept(LSock),
+    {ok, PSock} = gen_tcp:connect({0, 0, 0, 0}, 5432, [{active, true}, binary]),
+    reconnect_proxy_loop0(LSock, CSock, PSock);
+reconnect_proxy_loop0(LSock, CSock, PSock) ->
+    receive
+        {TestClient, close} ->
+            ok = gen_tcp:close(CSock),
+            ok = gen_tcp:close(PSock),
+            TestClient ! {self(), closed},
+            reconnect_proxy_loop0(LSock, undefined, undefined);
+        {_TestClient, close_during_xfer} ->
+            receive {tcp, CSock, _} -> ok end,
+            ok = gen_tcp:close(CSock),
+            ok = gen_tcp:close(PSock),
+            reconnect_proxy_loop0(LSock, undefined, undefined);
+        {tcp, CSock, Data} ->
+            ok = gen_tcp:send(PSock, Data),
+            reconnect_proxy_loop0(LSock, CSock, PSock);
+        {tcp, PSock, Data} ->
+            ok = gen_tcp:send(CSock, Data),
+            reconnect_proxy_loop0(LSock, CSock, PSock);
+        {tcp_closed, CSock} ->
+            ok = gen_tcp:close(PSock),
+            reconnect_proxy_loop0(LSock, undefined, undefined);
+        {tcp_closed, PSock} ->
+            ok = gen_tcp:close(CSock),
+            reconnect_proxy_loop0(LSock, undefined, undefined);
+        Message ->
+            ?debugVal(Message),
+            ?assert(false)
+    end.
+
+reconnect_test_() ->
+    {setup,
+    fun() ->
+        {ok, SupPid} = pgsql_connection_sup:start_link(),
+        ProxyPid = spawn_link(fun reconnect_proxy_loop/0),
+        {SupPid, ProxyPid}
+    end,
+    fun({SupPid, ProxyPid}) ->
+        unlink(ProxyPid),
+        exit(ProxyPid, normal),
+        kill_sup(SupPid)
+    end,
+    fun({_SupPid, ProxyPid}) ->
+        [
+            {"Reconnect after close",
+            ?_test(begin
+                Conn = pgsql_connection:open([{host, "0.0.0.0"}, {port, 35432}, {database, "test"}, {user, "test"}, {password, ""}, reconnect]),
+                ?assertEqual({{select, 1}, [{null}]}, pgsql_connection:simple_query("select null", Conn)),
+                ProxyPid ! {self(), close},
+                receive {ProxyPid, closed} -> ok end,
+                timer:sleep(100),   % make sure the driver got the tcp closed notice.
+                ?assertEqual({{select, 1}, [{null}]}, pgsql_connection:simple_query("select null", Conn)),
+                ?assertEqual({{select, 1}, [{null}]}, pgsql_connection:simple_query("select null", Conn)),
+                ok = pgsql_connection:close(Conn)
+            end)},
+            {"Socket is closed during transfer, driver returns {error, closed} even with reconnect",
+            ?_test(begin
+                Conn = pgsql_connection:open([{host, "0.0.0.0"}, {port, 35432}, {database, "test"}, {user, "test"}, {password, ""}, reconnect]),
+                ?assertEqual({{select, 1}, [{null}]}, pgsql_connection:simple_query("select null", Conn)),
+                ProxyPid ! {self(), close_during_xfer},
+                ?assertEqual({error, closed}, pgsql_connection:simple_query("select null", Conn)),
+                ?assertEqual({{select, 1}, [{null}]}, pgsql_connection:simple_query("select null", Conn)),
+                ok = pgsql_connection:close(Conn)
+            end)},
+            {"Socket is closed during transfer, driver does not return {error, closed} with retry",
+            ?_test(begin
+                Conn = pgsql_connection:open([{host, "0.0.0.0"}, {port, 35432}, {database, "test"}, {user, "test"}, {password, ""}, reconnect]),
+                ?assertEqual({{select, 1}, [{null}]}, pgsql_connection:simple_query("select null", Conn)),
+                ProxyPid ! {self(), close_during_xfer},
+                ?assertEqual({{select, 1}, [{null}]}, pgsql_connection:simple_query("select null", [retry], Conn)),
+                ok = pgsql_connection:close(Conn)
+            end)},
+            {"Do not reconnect at all without reconnect",
+            ?_test(begin
+                Conn = pgsql_connection:open([{host, "0.0.0.0"}, {port, 35432}, {database, "test"}, {user, "test"}, {password, ""}, {reconnect, false}]),
+                ?assertEqual({{select, 1}, [{null}]}, pgsql_connection:simple_query("select null", Conn)),
+                ProxyPid ! {self(), close},
+                receive {ProxyPid, closed} -> ok end,
+                timer:sleep(100),   % make sure the driver got the tcp closed notice.
+                ?assertEqual({error, closed}, pgsql_connection:simple_query("select null", Conn)),
+                ?assertEqual({error, closed}, pgsql_connection:simple_query("select null", Conn)),
+                ok = pgsql_connection:close(Conn)
+            end)}
+        ]
+    end
+    }.
+
 select_null_test_() ->
     {setup,
     fun() ->

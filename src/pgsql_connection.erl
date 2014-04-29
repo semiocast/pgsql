@@ -467,9 +467,15 @@ handle_info({_Tag, Socket, Data}, #state{socket = {_SocketModule, Socket}} = Sta
 handle_info({ClosedTag, Socket}, #state{socket = {_SocketModule, Socket}} = State0) when ClosedTag =:= tcp_closed orelse ClosedTag =:= ssl_closed ->
     State1 = State0#state{socket = closed},
     {noreply, State1};
+handle_info({ErrorTag, Socket, _SocketError}, #state{socket = {SocketModule, Socket}} = State0) when ErrorTag =:= tcp_error orelse ErrorTag =:= ssl_error ->
+    _ = SocketModule:close(Socket),
+    State1 = State0#state{socket = closed},
+    {noreply, State1};
 handle_info({Tag, _OtherSocket, _Data}, State0) when Tag =:= tcp orelse Tag =:= ssl ->
     {noreply, State0};
 handle_info({ClosedTag, _OtherSocket}, State0) when ClosedTag =:= tcp_closed orelse ClosedTag =:= ssl_closed ->
+    {noreply, State0};
+handle_info({ErrorTag, _OtherSocket, _SocketError}, State0) when ErrorTag =:= tcp_error orelse ErrorTag =:= ssl_error ->
     {noreply, State0}.
 
 %%--------------------------------------------------------------------
@@ -1135,7 +1141,11 @@ update_oid_map(#state{} = State0) ->
 -spec set_passive_or_reconnect_if_required(#state{}) -> #state{}.
 set_passive_or_reconnect_if_required(#state{socket = closed, options = Options} = State0) ->
     case proplists:get_value(reconnect, Options, true) of
-        true -> pgsql_open(State0);
+        true ->
+            case pgsql_open(State0) of
+                {ok, State1} -> State1;
+                {error, _} -> State0
+            end;
         false -> State0
     end;
 set_passive_or_reconnect_if_required(#state{socket = {gen_tcp, Socket}} = State0) ->
@@ -1244,7 +1254,13 @@ call_and_retry(ConnPid, Command, Retry, Timeout) ->
 do_query(Command, From, #state{current = undefined} = State0) ->
     State1 = State0#state{current = {Command, From}},
     State2 = set_passive_or_reconnect_if_required(State1),
-    do_query0(Command, From, State2);
+    case State2#state.socket of
+        closed ->
+            gen_server:reply(From, {error, closed}),
+            command_completed({Command, From}, State2);
+        _ ->
+            do_query0(Command, From, State2)
+    end;
 do_query(Command, From, #state{pending = Pending} = State0) ->
     State0#state{pending = [{Command, From} | Pending]}.
 
