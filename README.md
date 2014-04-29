@@ -11,7 +11,7 @@ This implementation was initially inspired and derived from existing database dr
 In particular, this driver has the following features:
 
 * OTP-supervision;
-* transparently handling many PostgreSQL types, including arrays and numerics;
+* transparently handling many PostgreSQL types, including arrays, numerics and geometric types;
 * cancellation of running queries using out-of-band protocol;
 * SSL support;
 * timeout for queries;
@@ -92,7 +92,7 @@ create database test with owner=test;
 License
 -------
 
-Copyright (c) 2009-2013, Semiocast.
+Copyright (c) 2009-2014, Semiocast.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
