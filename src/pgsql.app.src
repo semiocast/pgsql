@@ -12,6 +12,6 @@
             pgsql_sup
             ]},
         {registered,    [pgsql_sup, pgsql_connection_sup]},
-        {applications,  [kernel, stdlib]},
+        {applications,  [kernel, stdlib, crypto]},
         {mod,           {pgsql_app, []}}
     ]}.
