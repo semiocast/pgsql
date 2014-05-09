@@ -147,7 +147,7 @@
       oidmap            :: gb_trees:tree(pos_integer(), atom()),
       current           :: {tuple(), reference(), from()} | undefined | {tuple(), from()},
       pending           :: [{tuple(), reference(), from()}] | [{tuple(), from()}],
-      statement_timeout :: non_neg_integer()
+      statement_timeout :: non_neg_integer()    %% to pipeline statements with timeouts, currently unused
      }).
 
 -define(MESSAGE_HEADER_SIZE, 5).
@@ -257,6 +257,11 @@ simple_query(Query, Connection) ->
 simple_query(Query, QueryOptions, Connection) ->
     simple_query(Query, QueryOptions, ?REQUEST_TIMEOUT, Connection).
 
+%% @doc Perform a simple query with query options and a timeout.
+%% Issuing SET statement_timeout or altering default in postgresql.conf
+%% will confuse timeout logic and such manual handling of statement_timeout
+%% should not be mixed with calls to simple_query/4.
+%%
 -spec simple_query(iodata(), query_options(), timeout(), pgsql_connection()) -> result_tuple() | {error, any()}.
 simple_query(Query, QueryOptions, Timeout, {pgsql_connection, ConnectionPid}) ->
     call_and_retry(ConnectionPid, {simple_query, Query, QueryOptions, Timeout}, proplists:get_bool(retry, QueryOptions), adjust_timeout(Timeout)).
@@ -272,6 +277,9 @@ extended_query(Query, Parameters, Connection) ->
 extended_query(Query, Parameters, QueryOptions, Connection) ->
     extended_query(Query, Parameters, QueryOptions, ?REQUEST_TIMEOUT, Connection).
 
+%% @doc Perform an extended query with query options and a timeout.
+%% See discussion of simple_query/4 about timeout values.
+%%
 -spec extended_query(iodata(), [any()], query_options(), timeout(), pgsql_connection()) -> result_tuple() | {error, any()}.
 extended_query(Query, Parameters, QueryOptions, Timeout, {pgsql_connection, ConnectionPid}) ->
     call_and_retry(ConnectionPid, {extended_query, Query, Parameters, QueryOptions, Timeout}, proplists:get_bool(retry, QueryOptions), adjust_timeout(Timeout)).
@@ -482,21 +490,6 @@ handle_info({ErrorTag, _OtherSocket, _SocketError}, State0) when ErrorTag =:= tc
 %% @doc handle code change.
 %%
 -spec code_change(string() | {down, string()}, any(), any()) -> {ok, #state{}}.
-code_change("8", State8, _Extra) ->
-    {state, Options, Socket, BackendProcId, BackendSecret, IntegerDateTimes, OidMap, Current, Pending, StatementTimeout} = State8,
-    State9 = #state{
-        options = Options,
-        socket = Socket,
-        subscribers = [],
-        backend_procid = BackendProcId,
-        backend_secret = BackendSecret,
-        integer_datetimes = IntegerDateTimes,
-        oidmap = OidMap,
-        current = Current,
-        pending = Pending,
-        statement_timeout = StatementTimeout
-    },
-    {ok, State9};
 code_change(Vsn, State, Extra) ->
     error_logger:info_msg("~p: unknown code_change (~p, ~p, ~p)~n", [?MODULE, Vsn, State, Extra]),
     {ok, State}.
@@ -689,15 +682,18 @@ pgsql_simple_query(Query, Timeout, From, #state{socket = {SockModule, Sock}} = S
             Queries = [
                 io_lib:format("set statement_timeout = ~B", [Value]),
                 Query,
-                "set statement_timeout = 0"],
+                "set statement_timeout to default"],
             SinglePacket = [pgsql_protocol:encode_query_message(AQuery) || AQuery <- Queries],
             case SockModule:send(Sock, SinglePacket) of
                 ok ->
-                    {SetResult1, State1} = pgsql_simple_query_loop([], [], sync, State0),
+                    {SetResult, State1} = pgsql_simple_query_loop([], [], sync, State0),
+                    true = set_succeeded_or_within_failed_transaction(SetResult),
                     spawn_link(fun() ->
-                        pgsql_simple_query_loop([], [], {async, ConnPid, fun(Result) ->
-                            pgsql_simple_query_loop([], [], {async, ConnPid, fun(SetResult2) ->
-                                process_set_timeout_result(From, Result, [SetResult1, SetResult2], ConnPid, CurrentCommand)
+                        pgsql_simple_query_loop([], [], {async, ConnPid, fun(QueryResult) ->
+                            pgsql_simple_query_loop([], [], {async, ConnPid, fun(ResetResult) ->
+                                true = set_succeeded_or_within_failed_transaction(ResetResult),
+                                gen_server:reply(From, QueryResult),
+                                gen_server:cast(ConnPid, {command_completed, CurrentCommand})
                             end}, State1)
                         end}, State1)
                     end),
@@ -712,22 +708,16 @@ pgsql_simple_query(Query, Timeout, From, #state{socket = {SockModule, Sock}} = S
             end
     end.
 
-process_set_timeout_result(From, Result, SetResults, ConnPid, CurrentCommand) ->
-    % Make sure client knows about the error.
-    SetResult = case SetResults of
-        [SingleResult] -> SingleResult;
-        [{set, []}, SetResult2] -> SetResult2;
-        [{error, _} = SetResult1, _] -> SetResult1
-    end,
-    ReturnedResult = case SetResult of
-        {set, []} -> Result;
-        {error, _} -> case Result of
-            {error, _} -> Result;
-            _ -> SetResult
-        end
-    end,
-    gen_server:reply(From, ReturnedResult),
-    gen_server:cast(ConnPid, {command_completed, CurrentCommand}).
+% This function should always return true as set or reset may only fail because
+% we are within a failed transaction.
+% If set failed because the transaction was aborted, the query will fail
+% (unless it is a rollback).
+% If set succeeded within a transaction, but the query failed, the reset may
+% fail but set only applies to the transaction anyway.
+-spec set_succeeded_or_within_failed_transaction({set, []} | {error, pgsql_error:pgsql_error()}) -> boolean().
+set_succeeded_or_within_failed_transaction({set, []}) -> true;
+set_succeeded_or_within_failed_transaction({error, {pgsql_error, _} = Error}) ->
+    pgsql_error:is_in_failed_sql_transaction(Error).
 
 -spec pgsql_simple_query0(iodata(), sync, #state{}) -> {tuple(), #state{}};
                          (iodata(), {async, pid(), fun((any()) -> ok)}, #state{}) -> ok.
@@ -796,20 +786,17 @@ pgsql_extended_query(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, Timeout, F
             end),
             State0;
         Value ->
-            {SetResult1, State1} = pgsql_simple_query0(io_lib:format("set statement_timeout = ~B", [Value]), sync, State0),
-            case SetResult1 of
-                {set, []} ->
-                    spawn_link(fun() ->
-                        pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, {async, ConnPid, fun(Result) ->
-                            pgsql_simple_query0("set statement_timeout = 0", {async, ConnPid, fun(SetResult2) ->
-                                process_set_timeout_result(From, Result, [SetResult2], ConnPid, CurrentCommand)
-                            end}, State1)
-                        end}, State1)
-                    end);
-                {error, _} ->
-                    gen_server:reply(From, SetResult1),
-                    gen_server:cast(ConnPid, {command_completed, CurrentCommand})
-            end,
+            {SetResult, State1} = pgsql_simple_query0(io_lib:format("set statement_timeout = ~B", [Value]), sync, State0),
+            true = set_succeeded_or_within_failed_transaction(SetResult),
+            spawn_link(fun() ->
+                pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, {async, ConnPid, fun(QueryResult) ->
+                    pgsql_simple_query0("set statement_timeout to default", {async, ConnPid, fun(ResetResult) ->
+                        true = set_succeeded_or_within_failed_transaction(ResetResult),
+                        gen_server:reply(From, QueryResult),
+                        gen_server:cast(ConnPid, {command_completed, CurrentCommand})
+                    end}, State1)
+                end}, State1)
+            end),
             State1
     end.
 

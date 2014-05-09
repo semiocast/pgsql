@@ -3,11 +3,6 @@
 -type pgsql_oid() :: integer().
 -type pgsql_procid() :: integer().
 -type pgsql_format() :: text | binary.
--type pgsql_error_and_mention_field_type() ::
-    severity | code | message | detail | hint | position | internal_position
-    | internal_query | where | file | line | routine | {unknown, byte()}.
--type pgsql_error_and_mention_field() ::
-    {pgsql_error_and_mention_field_type(), binary()}.
 
 % from pg_type.h
 -define(BOOLOID, 16).
@@ -219,14 +214,14 @@
 }).
 -record(empty_query_response, {}).
 -record(error_response, {
-    fields :: [pgsql_error_and_mention_field()]
+    fields :: [pgsql_error:pgsql_error_and_mention_field()]
 }).
 -record(function_call_response, {
     value :: null | iodata()
 }).
 -record(no_data, {}).
 -record(notice_response, {
-    fields :: [pgsql_error_and_mention_field()]
+    fields :: [pgsql_error:pgsql_error_and_mention_field()]
 }).
 -record(notification_response, {
     procid :: pgsql_procid(),

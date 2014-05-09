@@ -942,7 +942,29 @@ timeout_test_() ->
         ?_assertMatch({error, {pgsql_error, _}}, pgsql_connection:sql_query("select pg_sleep(2)", [], 1500, Conn)),
         ?_assertMatch({error, {pgsql_error, _}}, pgsql_connection:param_query("select pg_sleep(2)", [], [], 1500, Conn)),
         ?_assertEqual({selected, [{null}]}, pgsql_connection:sql_query("select pg_sleep(2)", Conn)),
-        ?_assertEqual({selected, [{null}]}, pgsql_connection:param_query("select pg_sleep(2)", [], Conn))
+        ?_assertEqual({selected, [{null}]}, pgsql_connection:param_query("select pg_sleep(2)", [], Conn)),
+        ?_test(begin
+            ShowResult1 = pgsql_connection:simple_query("show statement_timeout", Conn),
+            ?assertMatch({show, [{_}]}, ShowResult1),
+            {show, [{Value1}]} = ShowResult1,
+            ?assertEqual({{select, 1}, [{1}]}, pgsql_connection:simple_query("select 1", [], 2500, Conn)),
+            ?assertEqual({{select, 1}, [{1}]}, pgsql_connection:simple_query("select 1", [], Conn)),
+            ShowResult2 = pgsql_connection:simple_query("show statement_timeout", Conn),
+            ?assertMatch({show, [{_}]}, ShowResult2),
+            {show, [{Value2}]} = ShowResult2,
+            ?assertEqual({set, []}, pgsql_connection:simple_query("set statement_timeout to 2500", Conn)),
+            ?assertEqual({{select, 1}, [{1}]}, pgsql_connection:simple_query("select 1", [], 2500, Conn)),
+            ?assertEqual({{select, 1}, [{1}]}, pgsql_connection:simple_query("select 1", [], Conn)),
+            ShowResult3 = pgsql_connection:simple_query("show statement_timeout", Conn),
+            ?assertMatch({show, [{_}]}, ShowResult3),
+            
+            % Only guarantee is that if the default was 0 (infinity), it is maintained
+            % after a query with a default (infinity) timeout.
+            if
+                Value1 =:= <<"0">> -> ?assertEqual(Value1, Value2);
+                true -> ok
+            end
+        end)
     ]
     end}.
 
@@ -1095,6 +1117,15 @@ invalid_query_test_() ->
                                 ?assertMatch({error, {pgsql_error, _Error}}, pgsql_connection:extended_query("FOO", [], [], 5000, Conn)),
                                 {'rollback',[]} = pgsql_connection:simple_query("ROLLBACK", Conn),
                                 R1 = pgsql_connection:extended_query("insert into tmp(id, other) values (5, $1)", ["toto"], Conn),
+                                ?assertEqual({{insert, 0, 1}, []}, R1)
+                        end),
+                    ?_test(begin
+                                {'begin',[]} = pgsql_connection:simple_query("BEGIN", Conn),
+                                R1 = pgsql_connection:extended_query("insert into tmp(id, other) values (6, $1)", ["toto"], Conn),
+                                ?assertEqual({{insert, 0, 1}, []}, R1),
+                                ?assertMatch({error, {pgsql_error, _Error}}, pgsql_connection:extended_query("FOO", [], [], 5000, Conn)),
+                                {'rollback',[]} = pgsql_connection:simple_query("ROLLBACK", [], 5000, Conn),
+                                R1 = pgsql_connection:extended_query("insert into tmp(id, other) values (6, $1)", ["toto"], Conn),
                                 ?assertEqual({{insert, 0, 1}, []}, R1)
                         end)
                 ]
