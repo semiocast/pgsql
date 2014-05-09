@@ -214,7 +214,7 @@ encode_array(Elements, ArrayType, OIDMap, IntegerDateTimes) ->
     ElementType = array_type_to_element_type(ArrayType, OIDMap),
     {EncodingType, ArrayElements} = encode_array_elements(Elements, ElementType, OIDMap, IntegerDateTimes, undefined, []),
     case EncodingType of
-        binary ->
+        binary when ElementType =/= undefined ->
             encode_array_binary(ArrayElements, ElementType);
         undefined when ElementType =/= undefined ->
             encode_array_binary(ArrayElements, ElementType);

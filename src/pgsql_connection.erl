@@ -756,7 +756,7 @@ pgsql_simple_query_loop(Result0, Acc, AsyncT, #state{socket = Socket, subscriber
             State1 = handle_parameter(Name, Value, AsyncT, State0),
             pgsql_simple_query_loop(Result0, Acc, AsyncT, State1);
         {ok, #row_description{fields = Fields}} when Result0 =:= [] ->
-            State1 = oob_update_oid_map_if_required(Fields, State0),
+            State1 = oob_update_oid_map_from_fields_if_required(Fields, State0),
             pgsql_simple_query_loop({rows, Fields, []}, Acc, AsyncT, State1);
         {ok, #data_row{values = Values}} when is_tuple(Result0) andalso element(1, Result0) =:= rows ->
             {rows, Fields, AccRows0} = Result0,
@@ -923,19 +923,20 @@ pgsql_extended_query_receive_loop0(#parse_complete{}, parse_complete, Fun, Acc0,
 pgsql_extended_query_receive_loop0(#parse_complete{}, {parse_complete_with_params, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
     pgsql_extended_query_receive_loop({parameter_description_with_params, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
 pgsql_extended_query_receive_loop0(#parameter_description{data_types = ParameterDataTypes}, {parameter_description_with_params, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock}} = State0) ->
-    PacketT = encode_bind_describe_execute(Mode, Parameters, ParameterDataTypes, State0#state.oidmap, State0#state.integer_datetimes),
+    State1 = oob_update_oid_map_if_required(ParameterDataTypes, State0),
+    PacketT = encode_bind_describe_execute(Mode, Parameters, ParameterDataTypes, State1#state.oidmap, State1#state.integer_datetimes),
     case PacketT of
         {ok, SinglePacket} ->
             case SockModule:send(Sock, SinglePacket) of
                 ok ->
-                    pgsql_extended_query_receive_loop(pre_bind_row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+                    pgsql_extended_query_receive_loop(pre_bind_row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State1);
                 {error, _} = SendError ->
-                    return_async(SendError, AsyncT, State0)
+                    return_async(SendError, AsyncT, State1)
             end;
         {error, _} = Error ->
             case SockModule:send(Sock, pgsql_protocol:encode_sync_message()) of
-                ok -> flush_until_ready_for_query(Error, AsyncT, State0);
-                {error, _} = SendSyncPacketError -> return_async(SendSyncPacketError, AsyncT, State0)
+                ok -> flush_until_ready_for_query(Error, AsyncT, State1);
+                {error, _} = SendSyncPacketError -> return_async(SendSyncPacketError, AsyncT, State1)
             end
     end;
 pgsql_extended_query_receive_loop0(#row_description{}, pre_bind_row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
@@ -949,7 +950,7 @@ pgsql_extended_query_receive_loop0(#bind_complete{}, bind_complete, Fun, Acc0, F
 pgsql_extended_query_receive_loop0(#no_data{}, row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
     pgsql_extended_query_receive_loop(no_data, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
 pgsql_extended_query_receive_loop0(#row_description{fields = Fields}, row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
-    State1 = oob_update_oid_map_if_required(Fields, State0),
+    State1 = oob_update_oid_map_from_fields_if_required(Fields, State0),
     pgsql_extended_query_receive_loop({rows, Fields}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State1);
 pgsql_extended_query_receive_loop0(#data_row{values = Values}, {rows, Fields} = LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
     DecodedRow = pgsql_protocol:decode_row(Fields, Values, State0#state.oidmap, State0#state.integer_datetimes),
@@ -1198,10 +1199,16 @@ oob_cancel(#state{options = Options, backend_procid = ProcID, backend_secret = S
 %%--------------------------------------------------------------------
 %% @doc Update the OID Map out of band, opening a new connection.
 %%
-oob_update_oid_map_if_required(Fields, #state{oidmap = OIDMap} = State0) ->
-    Required = lists:any(fun(#row_description_field{data_type_oid = Oid}) ->
-        not gb_trees:is_defined(Oid, OIDMap)
-    end, Fields),
+-spec oob_update_oid_map_from_fields_if_required([#row_description_field{}], #state{}) -> #state{}.
+oob_update_oid_map_from_fields_if_required(Fields, State0) ->
+    OIDs = [OID || #row_description_field{data_type_oid = OID} <- Fields],
+    oob_update_oid_map_if_required(OIDs, State0).
+
+-spec oob_update_oid_map_if_required([pgsql_oid()], #state{}) -> #state{}.
+oob_update_oid_map_if_required(OIDs, #state{oidmap = OIDMap} = State0) ->
+    Required = lists:any(fun(OID) ->
+        not gb_trees:is_defined(OID, OIDMap)
+    end, OIDs),
     case Required of
         true -> oob_update_oid_map(State0);
         false -> State0

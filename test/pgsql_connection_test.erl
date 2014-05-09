@@ -1061,6 +1061,7 @@ custom_enum_test_() ->
     fun() ->
         {ok, SupPid} = pgsql_connection_sup:start_link(),
         Conn = pgsql_connection:open("test", "test"),
+        pgsql_connection:sql_query("DROP TYPE IF EXISTS mood;", Conn),
         {SupPid, Conn}
     end,
     fun({SupPid, Conn}) ->
@@ -1077,7 +1078,10 @@ custom_enum_test_() ->
             ?assertMatch({selected, [{{MoodOID, <<"sad">>}}]} when is_integer(MoodOID), pgsql_connection:param_query("select 'sad'::mood;", [], Conn)),
             {updated, 0} = pgsql_connection:sql_query("COMMIT", Conn),
             ?assertMatch({selected, [{{mood, <<"sad">>}}]}, pgsql_connection:sql_query("select 'sad'::mood;", Conn)),
-            ?assertMatch({selected, [{{mood, <<"sad">>}}]}, pgsql_connection:param_query("select 'sad'::mood;", [], Conn))
+            ?assertMatch({selected, [{{mood, <<"sad">>}}]}, pgsql_connection:param_query("select 'sad'::mood;", [], Conn)),
+            ?assertMatch({selected, [{{mood, <<"sad">>}}]}, pgsql_connection:param_query("select ?::mood;", [<<"sad">>], Conn)),
+            ?assertMatch({selected, [{{array, [{mood, <<"sad">>}]}}]}, pgsql_connection:sql_query("select '{sad}'::mood[];", Conn)),
+            ?assertMatch({selected, [{{array, [{mood, <<"sad">>}]}}]}, pgsql_connection:param_query("select ?::mood[];", [{array, [<<"sad">>]}], Conn))
         end)
     ]
     end}.
@@ -1087,6 +1091,7 @@ custom_enum_native_test_() ->
     fun() ->
         {ok, SupPid} = pgsql_connection_sup:start_link(),
         Conn = pgsql_connection:open("test", "test"),
+        pgsql_connection:simple_query("DROP TYPE IF EXISTS mood;", Conn),
         {SupPid, Conn}
     end,
     fun({SupPid, Conn}) ->
@@ -1103,7 +1108,10 @@ custom_enum_native_test_() ->
             ?assertMatch({{select, 1}, [{{MoodOID, <<"sad">>}}]} when is_integer(MoodOID), pgsql_connection:extended_query("select 'sad'::mood;", [], Conn)),
             {'commit', []} = pgsql_connection:simple_query("COMMIT", Conn),
             ?assertMatch({{select, 1}, [{{mood, <<"sad">>}}]}, pgsql_connection:simple_query("select 'sad'::mood;", Conn)),
-            ?assertMatch({{select, 1}, [{{mood, <<"sad">>}}]}, pgsql_connection:extended_query("select 'sad'::mood;", [], Conn))
+            ?assertMatch({{select, 1}, [{{mood, <<"sad">>}}]}, pgsql_connection:extended_query("select 'sad'::mood;", [], Conn)),
+            ?assertMatch({{select, 1}, [{{mood, <<"sad">>}}]}, pgsql_connection:extended_query("select $1::mood;", [<<"sad">>], Conn)),
+            ?assertMatch({{select, 1}, [{{array, [{mood, <<"sad">>}]}}]}, pgsql_connection:simple_query("select '{sad}'::mood[];", Conn)),
+            ?assertMatch({{select, 1}, [{{array, [{mood, <<"sad">>}]}}]}, pgsql_connection:extended_query("select $1::mood[];", [{array, [<<"sad">>]}], Conn))
         end)
     ]
     end}.
