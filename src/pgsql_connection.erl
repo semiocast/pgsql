@@ -802,6 +802,48 @@ pgsql_extended_query(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, Timeout, F
 
 pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, AsyncT, #state{socket = {SockModule, Sock}, integer_datetimes = IntegerDateTimes} = State) ->
     ParseMessage = pgsql_protocol:encode_parse_message("", Query, []),
+    % We ask for a description of parameters only if required.
+    NeedStatementDescription = requires_statement_description(Mode, Parameters),
+    PacketT = case NeedStatementDescription of
+        true ->
+            DescribeStatementMessage = pgsql_protocol:encode_describe_message(statement, ""),
+            FlushMessage = pgsql_protocol:encode_flush_message(),
+            LoopState0 = {parse_complete, Mode, Parameters},
+            {ok, [ParseMessage, DescribeStatementMessage, FlushMessage], LoopState0};
+        false ->
+            case encode_bind_describe_execute(Mode, Parameters, [], IntegerDateTimes) of
+                {ok, BindExecute} ->
+                    {ok, [ParseMessage, BindExecute], parse_complete};
+                {error, _} = Error -> Error
+            end
+    end,
+    case PacketT of
+        {ok, SinglePacket, LoopState} ->
+            case SockModule:send(Sock, SinglePacket) of
+                ok ->
+                    case Mode of
+                        batch ->
+                            {_, ResultRL, FinalState} = lists:foldl(fun(_ParametersBatch, {AccLoopState, AccResults, AccState}) ->
+                                        {Result, AccState1} = pgsql_extended_query_receive_loop(AccLoopState, Fun, Acc0, FinalizeFun, 0, sync, AccState),
+                                        {bind_complete, [Result | AccResults], AccState1}
+                                end, {LoopState, [], State}, Parameters),
+                            Result = lists:reverse(ResultRL),
+                            return_async(Result, AsyncT, FinalState);
+                        all ->
+                            pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, 0, AsyncT, State);
+                        {cursor, MaxRowsStep} ->
+                            pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State)
+                    end;
+                {error, _} = SendSinglePacketError ->
+                    return_async(SendSinglePacketError, AsyncT, State)
+            end;
+        {error, _} ->
+            return_async(PacketT, AsyncT, State)
+    end.
+
+-spec encode_bind_describe_execute(all | {cursor, non_neg_integer()}, [any()], [pgsql_oid()], boolean()) -> {ok, iodata()} | {error, any()};
+                                  (batch, [[any()]], [pgsql_oid()], boolean()) -> {ok, iodata()} | {error, any()}.
+encode_bind_describe_execute(Mode, Parameters, ParameterDataTypes, IntegerDateTimes) ->
     DescribeMessage = pgsql_protocol:encode_describe_message(portal, ""),
     MaxRowsStep = case Mode of
         all -> 0;
@@ -813,99 +855,114 @@ pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, AsyncT, #
         MaxRowsStep > 0 -> pgsql_protocol:encode_flush_message();
         true -> pgsql_protocol:encode_sync_message()
     end,
-    SinglePacket = try
-        case Mode of
+    try
+        SinglePacket = case Mode of
             batch ->
-                BatchMessages = [[pgsql_protocol:encode_bind_message("", "", ParametersBatch, IntegerDateTimes), DescribeMessage, ExecuteMessage, SyncOrFlushMessage] || ParametersBatch <- Parameters],
-                [ParseMessage, BatchMessages];
+                [
+                    [pgsql_protocol:encode_bind_message("", "", ParametersBatch, ParameterDataTypes, IntegerDateTimes),
+                    DescribeMessage, ExecuteMessage, SyncOrFlushMessage] || ParametersBatch <- Parameters];
             _ ->
-                BindMessage = pgsql_protocol:encode_bind_message("", "", Parameters, IntegerDateTimes),
-                [ParseMessage, BindMessage, DescribeMessage, ExecuteMessage, SyncOrFlushMessage]
-        end
+                BindMessage = pgsql_protocol:encode_bind_message("", "", Parameters, ParameterDataTypes, IntegerDateTimes),
+                [BindMessage, DescribeMessage, ExecuteMessage, SyncOrFlushMessage]
+        end,
+        {ok, SinglePacket}
     catch throw:Exception ->
         {error, Exception}
-    end,
-    if is_tuple(SinglePacket) ->
-            return_async(SinglePacket, AsyncT, State);
-        true ->
-            case SockModule:send(Sock, SinglePacket) of
-                ok ->
-                    if
-                        Mode =:= batch ->
-                            {_, ResultRL, FinalState} = lists:foldl(fun(_ParametersBatch, {LoopState, AccResults, AccState}) ->
-                                        {Result, AccState1} = pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, sync, AccState),
-                                        {bind_complete, [Result | AccResults], AccState1}
-                                end, {parse_complete, [], State}, Parameters),
-                            Result = lists:reverse(ResultRL),
-                            return_async(Result, AsyncT, FinalState);
-                        true ->
-                            pgsql_extended_query_receive_loop(parse_complete, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State)
-                    end;
-                {error, _} = SendSinglePacketError ->
-                    return_async(SendSinglePacketError, AsyncT, State)
-            end
     end.
 
-pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock} = Socket, subscribers = Subscribers} = State0) ->
+requires_statement_description(batch, ParametersL) ->
+    lists:any(fun pgsql_protocol:bind_requires_statement_description/1, ParametersL);
+requires_statement_description(_Mode, Parameters) ->
+    pgsql_protocol:bind_requires_statement_description(Parameters).
+
+pgsql_extended_query_receive_loop(_LoopState, _Fun, _Acc, _FinalizeFun, _MaxRowsStep, AsyncT, #state{socket = closed} = State0) ->
+    return_async({error, closed}, AsyncT, State0);
+pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = Socket, subscribers = Subscribers} = State0) ->
     case receive_message(Socket, AsyncT, Subscribers) of
-        {ok, #parameter_status{name = Name, value = Value}} ->
-            State1 = handle_parameter(Name, Value, AsyncT, State0),
-            pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State1);
-        {ok, #parse_complete{}} when LoopState =:= parse_complete ->
-            pgsql_extended_query_receive_loop(bind_complete, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
-        {ok, #bind_complete{}} when LoopState =:= bind_complete ->
-            pgsql_extended_query_receive_loop(row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
-        {ok, #no_data{}} when LoopState =:= row_description ->
-            pgsql_extended_query_receive_loop([], Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
-        {ok, #row_description{fields = Fields}} when LoopState =:= row_description ->
-            State1 = oob_update_oid_map_if_required(Fields, State0),
-            pgsql_extended_query_receive_loop({rows, Fields}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State1);
-        {ok, #data_row{values = Values}} when is_tuple(LoopState) andalso element(1, LoopState) =:= rows ->
-            {rows, Fields} = LoopState,
-            DecodedRow = pgsql_protocol:decode_row(Fields, Values, State0#state.oidmap, State0#state.integer_datetimes),
-            Acc1 = Fun(DecodedRow, Acc0),
-            pgsql_extended_query_receive_loop(LoopState, Fun, Acc1, FinalizeFun, MaxRowsStep, AsyncT, State0);
-        {ok, #command_complete{command_tag = Tag}} ->
-            Result = FinalizeFun(Tag, Acc0),
-            if  MaxRowsStep > 0 ->
-                    case SockModule:send(Sock, pgsql_protocol:encode_sync_message()) of
-                        ok -> pgsql_extended_query_receive_loop({result, Result}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
-                        {error, _} = SendSinglePacketError -> return_async(SendSinglePacketError, AsyncT, State0)
-                    end;
-                true -> pgsql_extended_query_receive_loop({result, Result}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0)
-            end;
-        {ok, #portal_suspended{}} ->
-            ExecuteMessage = pgsql_protocol:encode_execute_message("", MaxRowsStep),
-            FlushMessage = pgsql_protocol:encode_flush_message(),
-            SinglePacket = [ExecuteMessage, FlushMessage],
-            case SockModule:send(Sock, SinglePacket) of
-                ok -> pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
-                {error, _} = SendSinglePacketError ->
-                    return_async(SendSinglePacketError, AsyncT, State0)
-            end;
-        {ok, #ready_for_query{}} when is_tuple(LoopState) andalso element(1, LoopState) =:= result ->
-            Result = element(2, LoopState),
-            return_async(Result, AsyncT, State0);
-        {ok, #error_response{fields = Fields}} ->
-            Error = {error, {pgsql_error, Fields}},
-            if  MaxRowsStep > 0 ->
-                    case SockModule:send(Sock, pgsql_protocol:encode_sync_message()) of
-                        ok -> flush_until_ready_for_query(Error, AsyncT, State0);
-                        {error, _} = SendSinglePacketError -> return_async(SendSinglePacketError, AsyncT, State0)
-                    end;
-                true -> flush_until_ready_for_query(Error, AsyncT, State0)
-            end;
-        {ok, #ready_for_query{} = Message} ->
-            Result = {error, {unexpected_message, Message}},
-            return_async(Result, AsyncT, State0);
         {ok, Message} ->
-            Error = {error, {unexpected_message, Message}},
-            flush_until_ready_for_query(Error, AsyncT, State0);
+            pgsql_extended_query_receive_loop0(Message, LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
         {error, _} = ReceiveError ->
             return_async(ReceiveError, AsyncT, State0)
+    end.
+        
+pgsql_extended_query_receive_loop0(#parameter_status{name = Name, value = Value}, LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    State1 = handle_parameter(Name, Value, AsyncT, State0),
+    pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State1);
+pgsql_extended_query_receive_loop0(#parse_complete{}, parse_complete, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    pgsql_extended_query_receive_loop(bind_complete, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+
+% Path where we ask the backend about what it expects.
+% We ignore row descriptions sent before bind as the format codes are null.
+pgsql_extended_query_receive_loop0(#parse_complete{}, {parse_complete, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    pgsql_extended_query_receive_loop({parameter_description, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+pgsql_extended_query_receive_loop0(#parameter_description{data_types = ParameterDataTypes}, {parameter_description, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock}} = State0) ->
+    PacketT = encode_bind_describe_execute(Mode, Parameters, ParameterDataTypes, State0#state.integer_datetimes),
+    case PacketT of
+        {ok, SinglePacket} ->
+            case SockModule:send(Sock, SinglePacket) of
+                ok ->
+                    pgsql_extended_query_receive_loop(pre_bind_row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+                {error, _} = SendError ->
+                    return_async(SendError, AsyncT, State0)
+            end;
+        {error, _} = Error ->
+            case SockModule:send(Sock, pgsql_protocol:encode_sync_message()) of
+                ok -> flush_until_ready_for_query(Error, AsyncT, State0);
+                {error, _} = SendSyncPacketError -> return_async(SendSyncPacketError, AsyncT, State0)
+            end
     end;
-pgsql_extended_query_receive_loop(_LoopState, _Fun, _Acc, _FinalizeFun, _MaxRowsStep, AsyncT, #state{socket = closed} = State0) ->
-    return_async({error, closed}, AsyncT, State0).
+pgsql_extended_query_receive_loop0(#row_description{}, pre_bind_row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    pgsql_extended_query_receive_loop(bind_complete, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+pgsql_extended_query_receive_loop0(#no_data{}, pre_bind_row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    pgsql_extended_query_receive_loop(bind_complete, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+
+% Common paths after bind.
+pgsql_extended_query_receive_loop0(#bind_complete{}, bind_complete, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    pgsql_extended_query_receive_loop(row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+pgsql_extended_query_receive_loop0(#no_data{}, row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    pgsql_extended_query_receive_loop([], Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+pgsql_extended_query_receive_loop0(#row_description{fields = Fields}, row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    State1 = oob_update_oid_map_if_required(Fields, State0),
+    pgsql_extended_query_receive_loop({rows, Fields}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State1);
+pgsql_extended_query_receive_loop0(#data_row{values = Values}, {rows, Fields} = LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    DecodedRow = pgsql_protocol:decode_row(Fields, Values, State0#state.oidmap, State0#state.integer_datetimes),
+    Acc1 = Fun(DecodedRow, Acc0),
+    pgsql_extended_query_receive_loop(LoopState, Fun, Acc1, FinalizeFun, MaxRowsStep, AsyncT, State0);
+pgsql_extended_query_receive_loop0(#command_complete{command_tag = Tag}, _LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock}} = State0) ->
+    Result = FinalizeFun(Tag, Acc0),
+    if  MaxRowsStep > 0 ->
+            case SockModule:send(Sock, pgsql_protocol:encode_sync_message()) of
+                ok -> pgsql_extended_query_receive_loop({result, Result}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+                {error, _} = SendSyncPacketError -> return_async(SendSyncPacketError, AsyncT, State0)
+            end;
+        true -> pgsql_extended_query_receive_loop({result, Result}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0)
+    end;
+pgsql_extended_query_receive_loop0(#portal_suspended{}, LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock}} = State0) ->
+    ExecuteMessage = pgsql_protocol:encode_execute_message("", MaxRowsStep),
+    FlushMessage = pgsql_protocol:encode_flush_message(),
+    SinglePacket = [ExecuteMessage, FlushMessage],
+    case SockModule:send(Sock, SinglePacket) of
+        ok -> pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+        {error, _} = SendSinglePacketError ->
+            return_async(SendSinglePacketError, AsyncT, State0)
+    end;
+pgsql_extended_query_receive_loop0(#ready_for_query{}, {result, Result}, _Fun, _Acc0, _FinalizeFun, _MaxRowsStep, AsyncT, State0) ->
+    return_async(Result, AsyncT, State0);
+pgsql_extended_query_receive_loop0(#error_response{fields = Fields}, _LoopState, _Fun, _Acc0, _FinalizeFun, 0, AsyncT, State0) ->
+    Error = {error, {pgsql_error, Fields}},
+    flush_until_ready_for_query(Error, AsyncT, State0);
+pgsql_extended_query_receive_loop0(#error_response{fields = Fields}, _LoopState, _Fun, _Acc0, _FinalizeFun, _MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock}} = State0) ->
+    Error = {error, {pgsql_error, Fields}},
+    case SockModule:send(Sock, pgsql_protocol:encode_sync_message()) of
+        ok -> flush_until_ready_for_query(Error, AsyncT, State0);
+        {error, _} = SendSyncPacketError -> return_async(SendSyncPacketError, AsyncT, State0)
+    end;
+pgsql_extended_query_receive_loop0(#ready_for_query{} = Message, _LoopState, _Fun, _Acc0, _FinalizeFun, _MaxRowsStep, AsyncT, State0) ->
+    Result = {error, {unexpected_message, Message}},
+    return_async(Result, AsyncT, State0);
+pgsql_extended_query_receive_loop0(Message, _LoopState, _Fun, _Acc0, _FinalizeFun, _MaxRowsStep, AsyncT, State0) ->
+    Error = {error, {unexpected_message, Message}},
+    flush_until_ready_for_query(Error, AsyncT, State0).
 
 flush_until_ready_for_query(Result, AsyncT, #state{socket = Socket, subscribers = Subscribers} = State0) ->
     case receive_message(Socket, AsyncT, Subscribers) of

@@ -378,6 +378,13 @@ array_types_test_() ->
                     ?_assertEqual({{select,1},[{{array,[<<"2">>,<<"3">>]}}]}, pgsql_connection:extended_query("select $1::text[]", ["{\"2\", \"3\"}"], Conn)),
                     ?_assertEqual({{select,1},[{{array,[<<"2">>,<<"3">>]}}]}, pgsql_connection:extended_query("select $1::text[]", [{array, ["2", "3"]}], Conn)),
                     ?_assertEqual({{select,1},[{{array,[<<"2">>,<<"3">>]}}]}, pgsql_connection:extended_query("select $1::text[]", [{array, [<<"2">>, <<"3">>]}], Conn)),
+                    ?_assertEqual({{select,1},[{{array,[<<"2,3">>,<<"4">>]}}]}, pgsql_connection:extended_query("select $1::text[]", [{array, [<<"2,3">>, <<"4">>]}], Conn)),
+                    ?_assertEqual({{select,1},[{{array,[<<"2,,3">>,<<"4">>]}}]}, pgsql_connection:extended_query("select $1::text[]", [{array, [<<"2,,3">>, <<"4">>]}], Conn)),
+                    ?_assertEqual({{select,1},[{{array,[<<"2\"3">>,<<"4">>]}}]}, pgsql_connection:extended_query("select $1::text[]", [{array, [<<"2\"3">>, <<"4">>]}], Conn)),
+                    ?_assertEqual({{select,1},[{{array,[<<"2\",,\"3">>,<<"4">>]}}]}, pgsql_connection:extended_query("select $1::text[]", [{array, [<<"2\",,\"3">>, <<"4">>]}], Conn)),
+                    ?_assertEqual({{select,1},[{{array,[<<"2'3">>,<<"4">>]}}]}, pgsql_connection:extended_query("select $1::text[]", [{array, [<<"2'3">>, <<"4">>]}], Conn)),
+                    ?_assertEqual({{select,1},[{{array,[<<"2\\3">>,<<"4">>]}}]}, pgsql_connection:extended_query("select $1::text[]", [{array, [<<"2\\3">>, <<"4">>]}], Conn)),
+                    ?_assertEqual({{select,1},[{{array,[<<"2">>,<<"3">>]}}]}, pgsql_connection:extended_query("select $1::bytea[]", [{array, [<<"2">>, <<"3">>]}], Conn)),
                     ?_assertEqual({{select,1},[{{array,[{array,[<<"2">>]},{array, [<<"3">>]}]}}]}, pgsql_connection:extended_query("select $1::text[]", [{array, [{array, [<<"2">>]}, {array, [<<"3">>]}]}], Conn)),
                     ?_assertEqual({{select,1},[{{array,[]}}]}, pgsql_connection:extended_query("select '{}'::text[]", [], Conn)),
                     ?_assertEqual({{select,1},[{{array,[]}}]}, pgsql_connection:extended_query("select '{}'::int[]", [], Conn)),
@@ -389,10 +396,20 @@ array_types_test_() ->
                     ?_assertEqual({{select,1},[{{array,[1,2]}}]}, pgsql_connection:simple_query("select ARRAY[1,2]::int[]", Conn)),
                     ?_test(
                         begin
-                                {updated, 1} = pgsql_connection:sql_query("create temporary table tmp (id integer primary key, ints integer[])", Conn),
+                                {{create, table}, []} = pgsql_connection:simple_query("create temporary table tmp (id integer primary key, ints integer[])", Conn),
                                 Array = lists:seq(1,1000000),
                                 R = pgsql_connection:extended_query("insert into tmp(id, ints) values($1, $2)", [1, {array, Array}], Conn),
                                 ?assertEqual({{insert, 0, 1}, []}, R)
+                        end),
+                    ?_test(
+                        begin
+                                {{create, table}, []} = pgsql_connection:simple_query("create temporary table tmp2 (id integer primary key, bins bytea[])", Conn),
+                                R = pgsql_connection:extended_query("insert into tmp2(id, bins) values($1, $2)", [1, {array, [<<2>>, <<3>>]}], Conn),
+                                ?assertEqual({{insert, 0, 1}, []}, R),
+                                R2 = pgsql_connection:extended_query("insert into tmp2(id, bins) values($1, $2)", [2, {array, [<<16#C2,1>>]}], Conn),
+                                ?assertEqual({{insert, 0, 1}, []}, R2),
+                                R3 = pgsql_connection:extended_query("insert into tmp2(id, bins) values($1, $2)", [3, {array, [<<2,0,3>>, <<4>>]}], Conn),
+                                ?assertEqual({{insert, 0, 1}, []}, R3)
                         end)
                 ]
         end

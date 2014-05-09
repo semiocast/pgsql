@@ -40,6 +40,7 @@
 -define(MACADDROID, 829).
 -define(INETOID, 869).
 -define(CIDROID, 650).
+-define(BYTEAARRAYOID, 1001). % not #defined
 -define(INT4ARRAYOID, 1007).
 -define(TEXTARRAYOID, 1009).
 -define(FLOAT4ARRAYOID, 1021).
