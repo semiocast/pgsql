@@ -152,6 +152,27 @@
 
 -define(MESSAGE_HEADER_SIZE, 5).
 
+% pgsql extended query states.
+-type extended_query_mode() :: all | batch | {cursor, non_neg_integer()}.
+-type extended_query_loop_state() ::
+        % expect parse_complete message
+        parse_complete
+    |   {parse_complete_with_params, extended_query_mode(), [any()]}
+        % expect parameter_description
+    |   {parameter_description_with_params, extended_query_mode(), [any()]}
+        % expect row_description or no_data
+    |   pre_bind_row_description
+        % expect bind_complete
+    |   bind_complete
+        % expect row_description or no_data
+    |   row_description
+        % expect data_row or command_complete
+    |   {rows, [#row_description_field{}]}
+        % expect command_complete
+    |   no_data
+        % expect ready_for_query
+    |   {result, any()}.
+
 %%--------------------------------------------------------------------
 %% @doc Open a connection to a database, throws an error if it failed.
 %% 
@@ -800,6 +821,8 @@ pgsql_extended_query(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, Timeout, F
             State1
     end.
 
+-spec pgsql_extended_query0(iodata(), [any()], fun(), any(), fun(), all | batch | {cursor, non_neg_integer()}, sync, #state{}) -> {any(), #state{}};
+                           (iodata(), [any()], fun(), any(), fun(), all | batch | {cursor, non_neg_integer()}, {async, pid(), fun((any()) -> ok)}, #state{}) -> ok.
 pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, AsyncT, #state{socket = {SockModule, Sock}, integer_datetimes = IntegerDateTimes} = State) ->
     ParseMessage = pgsql_protocol:encode_parse_message("", Query, []),
     % We ask for a description of parameters only if required.
@@ -808,7 +831,7 @@ pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, AsyncT, #
         true ->
             DescribeStatementMessage = pgsql_protocol:encode_describe_message(statement, ""),
             FlushMessage = pgsql_protocol:encode_flush_message(),
-            LoopState0 = {parse_complete, Mode, Parameters},
+            LoopState0 = {parse_complete_with_params, Mode, Parameters},
             {ok, [ParseMessage, DescribeStatementMessage, FlushMessage], LoopState0};
         false ->
             case encode_bind_describe_execute(Mode, Parameters, [], IntegerDateTimes) of
@@ -875,6 +898,8 @@ requires_statement_description(batch, ParametersL) ->
 requires_statement_description(_Mode, Parameters) ->
     pgsql_protocol:bind_requires_statement_description(Parameters).
 
+-spec pgsql_extended_query_receive_loop(extended_query_loop_state(), fun(), any(), fun(), non_neg_integer(), sync, #state{}) -> {any(), #state{}};
+                                       (extended_query_loop_state(), fun(), any(), fun(), non_neg_integer(), {async, pid(), fun((any()) -> ok)}, #state{}) -> ok.
 pgsql_extended_query_receive_loop(_LoopState, _Fun, _Acc, _FinalizeFun, _MaxRowsStep, AsyncT, #state{socket = closed} = State0) ->
     return_async({error, closed}, AsyncT, State0);
 pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = Socket, subscribers = Subscribers} = State0) ->
@@ -884,7 +909,9 @@ pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep
         {error, _} = ReceiveError ->
             return_async(ReceiveError, AsyncT, State0)
     end.
-        
+
+-spec pgsql_extended_query_receive_loop0(pgsql_backend_message(), extended_query_loop_state(), fun(), any(), fun(), non_neg_integer(), sync, #state{}) -> {any(), #state{}};
+                                        (pgsql_backend_message(), extended_query_loop_state(), fun(), any(), fun(), non_neg_integer(), {async, pid(), fun((any()) -> ok)}, #state{}) -> ok.
 pgsql_extended_query_receive_loop0(#parameter_status{name = Name, value = Value}, LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
     State1 = handle_parameter(Name, Value, AsyncT, State0),
     pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State1);
@@ -893,9 +920,9 @@ pgsql_extended_query_receive_loop0(#parse_complete{}, parse_complete, Fun, Acc0,
 
 % Path where we ask the backend about what it expects.
 % We ignore row descriptions sent before bind as the format codes are null.
-pgsql_extended_query_receive_loop0(#parse_complete{}, {parse_complete, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
-    pgsql_extended_query_receive_loop({parameter_description, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
-pgsql_extended_query_receive_loop0(#parameter_description{data_types = ParameterDataTypes}, {parameter_description, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock}} = State0) ->
+pgsql_extended_query_receive_loop0(#parse_complete{}, {parse_complete_with_params, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    pgsql_extended_query_receive_loop({parameter_description_with_params, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+pgsql_extended_query_receive_loop0(#parameter_description{data_types = ParameterDataTypes}, {parameter_description_with_params, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock}} = State0) ->
     PacketT = encode_bind_describe_execute(Mode, Parameters, ParameterDataTypes, State0#state.integer_datetimes),
     case PacketT of
         {ok, SinglePacket} ->
@@ -920,7 +947,7 @@ pgsql_extended_query_receive_loop0(#no_data{}, pre_bind_row_description, Fun, Ac
 pgsql_extended_query_receive_loop0(#bind_complete{}, bind_complete, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
     pgsql_extended_query_receive_loop(row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
 pgsql_extended_query_receive_loop0(#no_data{}, row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
-    pgsql_extended_query_receive_loop([], Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+    pgsql_extended_query_receive_loop(no_data, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
 pgsql_extended_query_receive_loop0(#row_description{fields = Fields}, row_description, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
     State1 = oob_update_oid_map_if_required(Fields, State0),
     pgsql_extended_query_receive_loop({rows, Fields}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State1);
