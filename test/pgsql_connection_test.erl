@@ -1196,7 +1196,7 @@ cancel_test_() ->
         ?_test(begin
             Self = self(),
             spawn_link(fun() ->
-                SleepResult = pgsql_connection:sql_query("select pg_sleep(1)", Conn),
+                SleepResult = pgsql_connection:sql_query("select pg_sleep(2)", Conn),
                 Self ! {async_result, SleepResult}
             end),
             ?assertEqual(ok, pgsql_connection:cancel(Conn)),
