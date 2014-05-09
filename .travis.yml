@@ -2,24 +2,19 @@ language: erlang
 otp_release:
    - 17.0
    - R16B03-1
-   - R16B03
-   - R16B02
-   - R16B01
-   - R16B
    - R15B02
-   - R15B01
-   - R15B
    - R14B04
-   - R14B03
-   - R14B02
 services: postgresql
 before_script:
   - psql -c 'CREATE ROLE test LOGIN; ALTER USER test WITH SUPERUSER;' -U postgres
   - psql -c 'CREATE DATABASE test WITH OWNER=test;' -U postgres
-env:
-  - TRAVIS_POSTGRESQL_VERSION=9.1
-  - TRAVIS_POSTGRESQL_VERSION=9.2
-  - TRAVIS_POSTGRESQL_VERSION=9.3
 before_install:
-  - sudo service postgresql stop
-  - sudo service postgresql start $TRAVIS_POSTGRESQL_VERSION
+  - "test x\"$TRAVIS_POSTGRESQL_VERSION\" = x\"\" || (sudo service postgresql stop && sudo service postgresql start $TRAVIS_POSTGRESQL_VERSION)"
+matrix:
+  include:
+    - otp_release: 17.0
+      env: TRAVIS_POSTGRESQL_VERSION=9.1
+    - otp_release: 17.0
+      env: TRAVIS_POSTGRESQL_VERSION=9.2
+    - otp_release: 17.0
+      env: TRAVIS_POSTGRESQL_VERSION=9.3
