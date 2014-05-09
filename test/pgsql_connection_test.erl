@@ -396,13 +396,13 @@ array_types_test_() ->
                     ?_assertEqual({{select,1},[{{array,[]},{array,[<<"foo">>]}}]}, pgsql_connection:extended_query("select $1::bytea[], $2::bytea[]", [{array, []}, {array, [<<"foo">>]}], Conn)),
 
                     ?_assertEqual({{select,1},[{{array,[1,2]}}]}, pgsql_connection:simple_query("select ARRAY[1,2]::int[]", Conn)),
-                    ?_test(
+                    {timeout, 20, ?_test(
                         begin
                                 {{create, table}, []} = pgsql_connection:simple_query("create temporary table tmp (id integer primary key, ints integer[])", Conn),
                                 Array = lists:seq(1,1000000),
                                 R = pgsql_connection:extended_query("insert into tmp(id, ints) values($1, $2)", [1, {array, Array}], Conn),
                                 ?assertEqual({{insert, 0, 1}, []}, R)
-                        end),
+                        end)},
                     ?_test(
                         begin
                                 {{create, table}, []} = pgsql_connection:simple_query("create temporary table tmp2 (id integer primary key, bins bytea[])", Conn),
