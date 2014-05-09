@@ -144,7 +144,7 @@
       backend_procid    :: integer(),
       backend_secret    :: integer(),
       integer_datetimes :: boolean(),
-      oidmap            :: gb_trees:tree(pos_integer(), atom()),
+      oidmap            :: pgsql_oid_map(),
       current           :: {tuple(), reference(), from()} | undefined | {tuple(), from()},
       pending           :: [{tuple(), reference(), from()}] | [{tuple(), from()}],
       statement_timeout :: non_neg_integer()    %% to pipeline statements with timeouts, currently unused
@@ -823,7 +823,7 @@ pgsql_extended_query(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, Timeout, F
 
 -spec pgsql_extended_query0(iodata(), [any()], fun(), any(), fun(), all | batch | {cursor, non_neg_integer()}, sync, #state{}) -> {any(), #state{}};
                            (iodata(), [any()], fun(), any(), fun(), all | batch | {cursor, non_neg_integer()}, {async, pid(), fun((any()) -> ok)}, #state{}) -> ok.
-pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, AsyncT, #state{socket = {SockModule, Sock}, integer_datetimes = IntegerDateTimes} = State) ->
+pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, AsyncT, #state{socket = {SockModule, Sock}, oidmap = OIDMap, integer_datetimes = IntegerDateTimes} = State) ->
     ParseMessage = pgsql_protocol:encode_parse_message("", Query, []),
     % We ask for a description of parameters only if required.
     NeedStatementDescription = requires_statement_description(Mode, Parameters),
@@ -834,7 +834,7 @@ pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, AsyncT, #
             LoopState0 = {parse_complete_with_params, Mode, Parameters},
             {ok, [ParseMessage, DescribeStatementMessage, FlushMessage], LoopState0};
         false ->
-            case encode_bind_describe_execute(Mode, Parameters, [], IntegerDateTimes) of
+            case encode_bind_describe_execute(Mode, Parameters, [], OIDMap, IntegerDateTimes) of
                 {ok, BindExecute} ->
                     {ok, [ParseMessage, BindExecute], parse_complete};
                 {error, _} = Error -> Error
@@ -864,9 +864,9 @@ pgsql_extended_query0(Query, Parameters, Fun, Acc0, FinalizeFun, Mode, AsyncT, #
             return_async(PacketT, AsyncT, State)
     end.
 
--spec encode_bind_describe_execute(all | {cursor, non_neg_integer()}, [any()], [pgsql_oid()], boolean()) -> {ok, iodata()} | {error, any()};
-                                  (batch, [[any()]], [pgsql_oid()], boolean()) -> {ok, iodata()} | {error, any()}.
-encode_bind_describe_execute(Mode, Parameters, ParameterDataTypes, IntegerDateTimes) ->
+-spec encode_bind_describe_execute(all | {cursor, non_neg_integer()}, [any()], [pgsql_oid()], pgsql_oid_map(), boolean()) -> {ok, iodata()} | {error, any()};
+                                  (batch, [[any()]], [pgsql_oid()], pgsql_oid_map(), boolean()) -> {ok, iodata()} | {error, any()}.
+encode_bind_describe_execute(Mode, Parameters, ParameterDataTypes, OIDMap, IntegerDateTimes) ->
     DescribeMessage = pgsql_protocol:encode_describe_message(portal, ""),
     MaxRowsStep = case Mode of
         all -> 0;
@@ -882,10 +882,10 @@ encode_bind_describe_execute(Mode, Parameters, ParameterDataTypes, IntegerDateTi
         SinglePacket = case Mode of
             batch ->
                 [
-                    [pgsql_protocol:encode_bind_message("", "", ParametersBatch, ParameterDataTypes, IntegerDateTimes),
+                    [pgsql_protocol:encode_bind_message("", "", ParametersBatch, ParameterDataTypes, OIDMap, IntegerDateTimes),
                     DescribeMessage, ExecuteMessage, SyncOrFlushMessage] || ParametersBatch <- Parameters];
             _ ->
-                BindMessage = pgsql_protocol:encode_bind_message("", "", Parameters, ParameterDataTypes, IntegerDateTimes),
+                BindMessage = pgsql_protocol:encode_bind_message("", "", Parameters, ParameterDataTypes, OIDMap, IntegerDateTimes),
                 [BindMessage, DescribeMessage, ExecuteMessage, SyncOrFlushMessage]
         end,
         {ok, SinglePacket}
@@ -923,7 +923,7 @@ pgsql_extended_query_receive_loop0(#parse_complete{}, parse_complete, Fun, Acc0,
 pgsql_extended_query_receive_loop0(#parse_complete{}, {parse_complete_with_params, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
     pgsql_extended_query_receive_loop({parameter_description_with_params, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
 pgsql_extended_query_receive_loop0(#parameter_description{data_types = ParameterDataTypes}, {parameter_description_with_params, Mode, Parameters}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock}} = State0) ->
-    PacketT = encode_bind_describe_execute(Mode, Parameters, ParameterDataTypes, State0#state.integer_datetimes),
+    PacketT = encode_bind_describe_execute(Mode, Parameters, ParameterDataTypes, State0#state.oidmap, State0#state.integer_datetimes),
     case PacketT of
         {ok, SinglePacket} ->
             case SockModule:send(Sock, SinglePacket) of
