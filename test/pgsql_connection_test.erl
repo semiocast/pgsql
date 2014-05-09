@@ -392,6 +392,8 @@ array_types_test_() ->
                     
                     ?_assertEqual({{select,1},[{{array,[{array,[<<"2">>]},{array, [<<"3">>]}]}}]}, pgsql_connection:simple_query("select '{{\"2\"}, {\"3\"}}'::text[][]", Conn)),
                     ?_assertEqual({{select,1},[{{array,[{array,[1,2]}, {array, [3,4]}]}}]}, pgsql_connection:simple_query("select ARRAY[ARRAY[1,2], ARRAY[3,4]]", Conn)),
+                    ?_assertEqual({{select,1},[{{array,[]}}]}, pgsql_connection:extended_query("select $1::bytea[]", [{array, []}], Conn)),
+                    ?_assertEqual({{select,1},[{{array,[]},{array,[<<"foo">>]}}]}, pgsql_connection:extended_query("select $1::bytea[], $2::bytea[]", [{array, []}, {array, [<<"foo">>]}], Conn)),
 
                     ?_assertEqual({{select,1},[{{array,[1,2]}}]}, pgsql_connection:simple_query("select ARRAY[1,2]::int[]", Conn)),
                     ?_test(

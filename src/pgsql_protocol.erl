@@ -295,7 +295,7 @@ get_array_dims([{array, SubElements} | _] = Row) ->
     Dims0 = get_array_dims(SubElements),
     Dim = length(Row),
     [Dim | Dims0];
-get_array_dims([_OtherElement | _] = Row) ->
+get_array_dims(Row) ->
     Dim = length(Row),
     [Dim].
 
