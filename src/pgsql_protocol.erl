@@ -789,6 +789,7 @@ decode_value_text(?VOIDOID, _Value, _OIDMap) -> null;
 decode_value_text(TypeOID, Value, _OIDMap) when TypeOID =:= ?TEXTOID
             orelse TypeOID =:= ?UUIDOID
             orelse TypeOID =:= ?NAMEOID
+            orelse TypeOID =:= ?BPCHAROID
             orelse TypeOID =:= ?VARCHAROID
              -> Value;
 decode_value_text(TypeOID, Value, OIDMap) ->
@@ -869,6 +870,7 @@ decode_value_bin(?INT2OID, <<Value:16/signed-integer>>, _OIDMap, _IntegerDateTim
 decode_value_bin(?INT4OID, <<Value:32/signed-integer>>, _OIDMap, _IntegerDateTimes) -> Value;
 decode_value_bin(?OIDOID, <<Value:32/signed-integer>>, _OIDMap, _IntegerDateTimes) -> Value;
 decode_value_bin(?TEXTOID, Value, _OIDMap, _IntegerDateTimes) -> Value;
+decode_value_bin(?BPCHAROID, Value, _OIDMap, _IntegerDateTimes) -> Value;
 decode_value_bin(?VARCHAROID, Value, _OIDMap, _IntegerDateTimes) -> Value;
 decode_value_bin(?FLOAT4OID, <<Value:32/float>>, _OIDMap, _IntegerDateTimes) -> Value;
 decode_value_bin(?FLOAT4OID, <<127,192,0,0>>, _OIDMap, _IntegerDateTimes) -> 'NaN';

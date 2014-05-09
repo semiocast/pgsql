@@ -357,6 +357,32 @@ types_test_() ->
         ]
     end}.
 
+text_types_test_() ->
+    {setup,
+        fun() ->
+                {ok, SupPid} = pgsql_connection_sup:start_link(),
+                Conn = pgsql_connection:open("test", "test"),
+                {SupPid, Conn}
+        end,
+        fun({SupPid, Conn}) ->
+                pgsql_connection:close(Conn),
+                kill_sup(SupPid)
+        end,
+        fun({_SupPid, Conn}) ->
+                [
+                    ?_assertEqual({{select,1},[{<<"foo">>}]}, pgsql_connection:simple_query("select 'foo'::text", Conn)),
+                    ?_assertEqual({{select,1},[{<<"foo">>}]}, pgsql_connection:extended_query("select $1::text", [<<"foo">>], Conn)),
+                    ?_assertEqual({{select,1},[{<<"foo         ">>}]}, pgsql_connection:simple_query("select 'foo'::char(12)", Conn)),
+                    ?_assertEqual({{select,1},[{<<"foo         ">>}]}, pgsql_connection:extended_query("select $1::char(12)", [<<"foo">>], Conn)),
+                    ?_assertEqual({{select,1},[{<<"foo">>}]}, pgsql_connection:simple_query("select 'foo'::varchar(12)", Conn)),
+                    ?_assertEqual({{select,1},[{<<"foo">>}]}, pgsql_connection:extended_query("select $1::varchar(12)", [<<"foo">>], Conn)),
+                    ?_assertEqual({{select,1},[{<<"foo">>}]}, pgsql_connection:simple_query("select 'foobar'::char(3)", Conn)),
+                    ?_assertEqual({{select,1},[{<<"foo">>}]}, pgsql_connection:extended_query("select $1::char(3)", [<<"foobar">>], Conn))
+                ]
+        end
+    }.
+
+
 array_types_test_() ->
     {setup,
         fun() ->
