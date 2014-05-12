@@ -1015,20 +1015,41 @@ timeout_test_() ->
     ]
     end}.
 
-ssl_test_OFF() ->
+postgression_ssl_test_() ->
     {setup,
     fun() ->
+        ssl:start(),
         {ok, SupPid} = pgsql_connection_sup:start_link(),
-        Conn = pgsql_connection:open("127.0.0.1", "test", "test", "", [{ssl, true}]),
-        {SupPid, Conn}
+        ok = application:start(inets),
+        {ok, {{"HTTP/1.1",200,"OK"}, _Headers, ConnectionString}} = httpc:request("http://api.postgression.com/"),
+        {match, [User, Password, Host, PortStr, Database]} =
+            re:run(ConnectionString, "^postgres://(.*):(.*)@(.*):([0-9]+)/(.*)$", [{capture, all_but_first, list}]),
+        Port = list_to_integer(PortStr),
+        {SupPid, {Host, Database, User, Password, Port}}
     end,
-    fun({SupPid, Conn}) ->
-        pgsql_connection:close(Conn),
-        kill_sup(SupPid)
+    fun({SupPid, _ConnInfo}) ->
+        kill_sup(SupPid),
+        ssl:stop()
     end,
-    fun({_SupPid, Conn}) ->
+    fun({_SupPid, {Host, Database, User, Password, Port}}) ->
     [
-        ?_assertEqual({selected, [{null}]}, pgsql_connection:sql_query("select null", Conn))
+        {"Postgression requires SSL",
+        ?_test(begin
+            try
+                pgsql_connection:open(Host, Database, User, Password, [{port, Port}]),
+                ?assert(false)
+            catch throw:{pgsql_error, _} ->
+                ok
+            end
+        end)
+        },
+        {"SSL Connection test",
+        ?_test(begin
+            Conn = pgsql_connection:open(Host, Database, User, Password, [{port, Port}, {ssl, true}]),
+            ?assertEqual({show, [{<<"on">>}]}, pgsql_connection:simple_query("show ssl", Conn)),
+            pgsql_connection:close(Conn)
+        end)
+        }
     ]
     end}.
 
