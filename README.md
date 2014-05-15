@@ -10,7 +10,7 @@ This implementation was initially inspired and derived from existing database dr
 
 In particular, this driver has the following features:
 
-* OTP-supervision;
+* OTP-supervision and OTP-upgrades;
 * transparently handling many PostgreSQL types, including arrays, numerics and geometric types;
 * cancellation of running queries using out-of-band protocol;
 * SSL support;
@@ -88,6 +88,11 @@ create user test;
 alter user test with superuser;
 create database test with owner=test;
 ```
+
+OTP upgrades
+------------
+
+Application upgrade file ([pgsql.appup](https://github.com/semiocast/pgsql/blob/master/src/pgsql.appup)) is updated for OTP release upgrades, so this application can easily be upgraded without any downtime, even with long running queries. This file is updated for each [release tags](https://github.com/semiocast/pgsql/releases).
 
 License
 -------
