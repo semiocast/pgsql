@@ -826,10 +826,24 @@ datetime_types_test_() ->
         ?_assertEqual({selected, [{'-infinity'}]},   pgsql_connection:param_query("select '-infinity'::timestamp", [], Conn)),
         ?_assertEqual({selected, [{infinity}]},   pgsql_connection:param_query("select 'infinity'::timestamptz", [], Conn)),
         ?_assertEqual({selected, [{'-infinity'}]},   pgsql_connection:param_query("select '-infinity'::timestamptz", [], Conn)),
-        
+
         ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3}}}]},   pgsql_connection:extended_query("select $1::timestamptz", [{{2012,1,17},{10,54,3}}], Conn)),
         ?_assertEqual({{select, 1}, [{{2012,1,17}}]},   pgsql_connection:extended_query("select $1::date", [{2012,1,17}], Conn)),
-        ?_assertEqual({{select, 1}, [{{10,54,3}}]},   pgsql_connection:extended_query("select $1::time", [{10,54,3}], Conn))
+        ?_assertEqual({{select, 1}, [{{10,54,3}}]},   pgsql_connection:extended_query("select $1::time", [{10,54,3}], Conn)),
+
+        {"Create temporary table for the times", ?_assertEqual({updated, 1}, pgsql_connection:sql_query("create temporary table times (a_timestamp timestamp, a_time time)", Conn))},
+        {"Insert timestamp with micro second resolution",
+            ?_assertEqual({{insert, 0, 1}, []}, pgsql_connection:extended_query("insert into times (a_timestamp, a_time) values ($1, $2)", [{{2014, 5, 15}, {12, 12, 12.999999}}, null], Conn))
+        },
+        {"Insert timestamp without micro second resolution",
+            ?_assertEqual({{insert, 0, 1}, []}, pgsql_connection:extended_query("insert into times (a_timestamp, a_time) values ($1, $2)", [{{2014, 5, 15}, {12, 12, 12}}, null], Conn))
+        },
+        {"Insert a time with micro second resolution",
+            ?_assertEqual({{insert, 0, 1}, []}, pgsql_connection:extended_query("insert into times (a_timestamp, a_time) values ($1, $2)", [null, {12, 12, 12.999999}], Conn))
+        },
+        {"Insert a time without micro second resolution",
+            ?_assertEqual({{insert, 0, 1}, []}, pgsql_connection:extended_query("insert into times (a_timestamp, a_time) values ($1, $2)", [null, {12, 12, 12}], Conn))
+        }
     ]
     end}.
 

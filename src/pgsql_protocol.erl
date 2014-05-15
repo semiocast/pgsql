@@ -163,8 +163,12 @@ encode_parameter(true, _Type, _OIDMap, _IntegerDateTimes) ->
     {text, <<1:32/integer, $t>>};
 encode_parameter(false, _Type, _OIDMap, _IntegerDateTimes) ->
     {text, <<1:32/integer, $f>>};
+encode_parameter({{Year, Month, Day}, {Hour, Min, Sec}}, Type, OIDMap, IntegerDateTimes) when is_float(Sec) ->
+    encode_parameter(lists:flatten(io_lib:format("~4.10.0B-~2.10.0B-~2.10.0BT~2.10.0B:~2.10.0B:~9.6.0f", [Year, Month, Day, Hour, Min, Sec])), Type, OIDMap, IntegerDateTimes);
 encode_parameter({{Year, Month, Day}, {Hour, Min, Sec}}, Type, OIDMap, IntegerDateTimes) ->
     encode_parameter(lists:flatten(io_lib:format("~4.10.0B-~2.10.0B-~2.10.0BT~2.10.0B:~2.10.0B:~2.10.0B", [Year, Month, Day, Hour, Min, Sec])), Type, OIDMap, IntegerDateTimes);
+encode_parameter({Hour, Min, Sec}, Type, OIDMap, IntegerDateTimes) when is_float(Sec) andalso Hour >= 0 andalso Hour < 24 andalso Min >= 0 andalso Min < 60 andalso Sec > 0 andalso Sec =< 60 ->
+    encode_parameter(lists:flatten(io_lib:format("~2.10.0B:~2.10.0B:~9.6.0f", [Hour, Min, Sec])), Type, OIDMap, IntegerDateTimes);
 encode_parameter({Hour, Min, Sec}, Type, OIDMap, IntegerDateTimes) when Hour >= 0 andalso Hour < 24 andalso Min >= 0 andalso Min < 60 andalso Sec > 0 andalso Sec =< 60 ->
     encode_parameter(lists:flatten(io_lib:format("~2.10.0B:~2.10.0B:~2.10.0B", [Hour, Min, Sec])), Type, OIDMap, IntegerDateTimes);
 encode_parameter({Year, Month, Day}, Type, OIDMap, IntegerDateTimes) when Month > 0 andalso Month =< 12 andalso Day > 0 andalso Day =< 31 ->
