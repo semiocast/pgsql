@@ -270,11 +270,13 @@ param_query(Query, Parameters, QueryOptions, Timeout, Connection) ->
 %%--------------------------------------------------------------------
 %% @doc Perform a simple query.
 %%
--spec simple_query(iodata(), pgsql_connection()) -> result_tuple() | [result_tuple()] | {error, any()}.
+-spec simple_query(iodata(), pgsql_connection()) ->
+    result_tuple() | {error, any()} | [result_tuple() | {error, any()}].
 simple_query(Query, Connection) ->
     simple_query(Query, [], Connection).
 
--spec simple_query(iodata(), query_options(), pgsql_connection()) -> result_tuple() | [result_tuple()] | {error, any()}.
+-spec simple_query(iodata(), query_options(), pgsql_connection()) ->
+    result_tuple() | {error, any()} | [result_tuple() | {error, any()}].
 simple_query(Query, QueryOptions, Connection) ->
     simple_query(Query, QueryOptions, ?REQUEST_TIMEOUT, Connection).
 
@@ -283,7 +285,8 @@ simple_query(Query, QueryOptions, Connection) ->
 %% will confuse timeout logic and such manual handling of statement_timeout
 %% should not be mixed with calls to simple_query/4.
 %%
--spec simple_query(iodata(), query_options(), timeout(), pgsql_connection()) -> result_tuple() | [result_tuple()] | {error, any()}.
+-spec simple_query(iodata(), query_options(), timeout(), pgsql_connection()) ->
+    result_tuple() | {error, any()} | [result_tuple() | {error, any()}].
 simple_query(Query, QueryOptions, Timeout, {pgsql_connection, ConnectionPid}) ->
     call_and_retry(ConnectionPid, {simple_query, Query, QueryOptions, Timeout}, proplists:get_bool(retry, QueryOptions), adjust_timeout(Timeout)).
 
@@ -308,15 +311,18 @@ extended_query(Query, Parameters, QueryOptions, Timeout, {pgsql_connection, Conn
 %%--------------------------------------------------------------------
 %% @doc Perform a query several times with parameters.
 %%
--spec batch_query(iodata(), [any()], pgsql_connection()) -> [result_tuple()] | {error, any()}.
+-spec batch_query(iodata(), [any()], pgsql_connection()) ->
+    [result_tuple()] | {error, any()} | [result_tuple() | {error, any()}].
 batch_query(Query, Parameters, Connection) ->
     batch_query(Query, Parameters, [], Connection).
 
--spec batch_query(iodata(), [any()], query_options(), pgsql_connection()) -> [result_tuple()] | {error, any()}.
+-spec batch_query(iodata(), [any()], query_options(), pgsql_connection()) ->
+    [result_tuple()] | {error, any()} | [result_tuple() | {error, any()}].
 batch_query(Query, Parameters, QueryOptions, Connection) ->
     batch_query(Query, Parameters, QueryOptions, ?REQUEST_TIMEOUT, Connection).
 
--spec batch_query(iodata(), [any()], query_options(), timeout(), pgsql_connection()) -> [result_tuple()] | {error, any()}.
+-spec batch_query(iodata(), [any()], query_options(), timeout(), pgsql_connection()) ->
+    [result_tuple()] | {error, any()} | [result_tuple() | {error, any()}].
 batch_query(Query, Parameters, QueryOptions, Timeout, {pgsql_connection, ConnectionPid}) ->
     call_and_retry(ConnectionPid, {batch_query, Query, Parameters, QueryOptions, Timeout}, proplists:get_bool(retry, QueryOptions), adjust_timeout(Timeout)).
 
