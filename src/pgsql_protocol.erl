@@ -782,7 +782,7 @@ decode_value_text(?TIMEOID, Value, _OIDMap) ->
     {Hour, Min, Secs};
 decode_value_text(?TIMETZOID, Value, _OIDMap) ->
     {ok, [Hour, Min], SecsStr0} = io_lib:fread("~u:~u:", binary_to_list(Value)),
-    SecsStr = case string:tokens(SecsStr0, "+") of
+    SecsStr = case string:tokens(SecsStr0, "+-") of
         [SecsStr1, _TZ] -> SecsStr1;
         [SecsStr1] -> SecsStr1
     end,
@@ -806,7 +806,7 @@ decode_value_text(?TIMESTAMPOID, Value, _OIDMap) ->
     {{Year, Month, Day}, {Hour, Min, Secs}};
 decode_value_text(?TIMESTAMPTZOID, Value, _OIDMap) ->
     {ok, [Year, Month, Day, Hour, Min], SecsStr0} = io_lib:fread("~u-~u-~u ~u:~u:", binary_to_list(Value)),
-    SecsStr = case string:tokens(SecsStr0, "+") of
+    SecsStr = case string:tokens(SecsStr0, "+-") of
         [SecsStr1, _TZ] -> SecsStr1;
         [SecsStr1] -> SecsStr1
     end,
