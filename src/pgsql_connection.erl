@@ -769,9 +769,20 @@ pgsql_simple_query_loop(Result0, Acc, AsyncT, #state{socket = Socket, subscriber
             DecodedRow = pgsql_protocol:decode_row(Fields, Values, State0#state.oidmap, State0#state.integer_datetimes),
             AccRows1 = [DecodedRow | AccRows0],
             pgsql_simple_query_loop({rows, Fields, AccRows1}, Acc, AsyncT, State0);
+	{ok, #copy_out_response{format = Format}} when Result0 =:= [] ->
+	    Fields = [Format],
+	    State1 = oob_update_oid_map_from_fields_if_required(Fields, State0),
+	    pgsql_simple_query_loop({copy, Fields, []}, Acc, AsyncT, State1);
+	{ok, #copy_data{data = Data}} when is_tuple(Result0) andalso element(1, Result0) =:= copy ->
+	    {copy, Fields, AccData0} = Result0,
+	    AccData1 = [Data | AccData0],
+	    pgsql_simple_query_loop({copy, Fields, AccData1}, Acc, AsyncT, State0);
+	{ok, #copy_done{}} ->
+	    pgsql_simple_query_loop(Result0, Acc, AsyncT, State0);
         {ok, #command_complete{command_tag = Tag}} ->
             ResultRows = case Result0 of
                 {rows, _Descs, AccRows} -> lists:reverse(AccRows);
+		{copy, _Descs, AccData} -> lists:reverse(AccData);
                 [] -> []
             end,
             DecodedTag = decode_tag(Tag),
@@ -962,6 +973,15 @@ pgsql_extended_query_receive_loop0(#data_row{values = Values}, {rows, Fields} = 
     DecodedRow = pgsql_protocol:decode_row(Fields, Values, State0#state.oidmap, State0#state.integer_datetimes),
     Acc1 = Fun(DecodedRow, Acc0),
     pgsql_extended_query_receive_loop(LoopState, Fun, Acc1, FinalizeFun, MaxRowsStep, AsyncT, State0);
+pgsql_extended_query_receive_loop0(#copy_out_response{format = Format}, _LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    Fields = [Format],
+    State1 = oob_update_oid_map_from_fields_if_required(Fields, State0),
+    pgsql_extended_query_receive_loop({copy, Fields}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State1);
+pgsql_extended_query_receive_loop0(#copy_data{data = Data}, {copy, Fields} = LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    Acc1 = Fun(Data, Acc0),
+    pgsql_extended_query_receive_loop(LoopState, Fun, Acc1, FinalizeFun, MaxRowsStep, AsyncT, State0);
+pgsql_extended_query_receive_loop0(#copy_done{}, LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0) ->
+    pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
 pgsql_extended_query_receive_loop0(#command_complete{command_tag = Tag}, _LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = {SockModule, Sock}} = State0) ->
     Result = FinalizeFun(Tag, Acc0),
     if  MaxRowsStep > 0 ->

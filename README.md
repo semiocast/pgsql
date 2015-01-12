@@ -63,6 +63,16 @@ Perform an extended query and fold (resp. map, execute a function on each row). 
     
 Cancel the current running query. This opens a new connection to cancel the query (out-of-band cancelation).
 
+### COPY support ###
+
+```COPY``` is a PostgreSQL-specific command for bulk transfers of table contents. It is less structured and more brittle to user errors.
+
+#### copying from a table ####
+
+```Connection:simple_query("COPY mytable TO STDOUT")``` will return ```{{copy, ListSize},[<<Tab-delimited data>>, ...]}```. ```ListSize``` is the number of elements in the associated list, which often corresponds to the number of rows in the table. The actual contents of the returned data depend on the COPY query (for example, specifying a format).
+
+```extended_query```, ```fold```, ```map```, and ```foreach``` may also be used, but note that Postgres does not permit parameter-binding in COPY queries.
+
 ### ODBC-like API ###
 
 The driver also has an ODBC-like interface, which is deprecated. It is composed of ```sql_query/2,3,4```, ```param_query/3,4,5``` and utility function ```convert_statement/1```
