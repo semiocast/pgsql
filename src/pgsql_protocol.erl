@@ -19,6 +19,9 @@
     encode_sync_message/0,
     encode_flush_message/0,
     encode_cancel_message/2,
+    encode_copy_data_message/1,
+    encode_copy_done/0,
+    encode_copy_fail/1,
     
     decode_message/2,
     decode_row/4,
@@ -70,6 +73,30 @@ encode_password_message(Password) ->
 encode_query_message(Query) ->
     encode_string_message($Q, Query).
 
+%%--------------------------------------------------------------------
+%% @doc Encode a data segment of a COPY operation
+%%
+-spec encode_copy_data_message(iodata()) -> binary().
+encode_copy_data_message(Message) ->
+    StringBin = iolist_to_binary(Message),
+    MessageLen = byte_size(StringBin) + 4,
+    <<$d, MessageLen:32/integer, StringBin/binary>>.
+
+%%--------------------------------------------------------------------
+%% @doc Encode the end of a COPY operation
+%%
+-spec encode_copy_done() -> binary().
+encode_copy_done() ->
+    <<$c, 4:32/integer>>.
+
+%%--------------------------------------------------------------------
+%% @doc Encode the cancellation of a COPY operation with the given
+%%      failure message
+%%
+-spec encode_copy_fail(iodata()) -> binary().
+encode_copy_fail(ErrorMessage) ->
+    encode_string_message($f, ErrorMessage).
+    
 %%--------------------------------------------------------------------
 %% @doc Encode a parse message.
 %%

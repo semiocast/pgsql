@@ -229,6 +229,64 @@ sql_query_test_() ->
     ]
     end}.
 
+copy_test_() ->
+    {setup,
+     fun() ->
+	     {ok, SupPid} = pgsql_connection_sup:start_link(),
+	     Conn = pgsql_connection:open("test", "test"),
+	     {SupPid, Conn}
+     end,
+     fun({SupPid, Conn}) ->
+	     pgsql_connection:close(Conn),
+	     kill_sup(SupPid)
+     end,
+     fun({_SupPid, Conn}) ->
+     [
+      {"Create temporary table for copies",
+       ?_assertEqual({{create,table},[]}, pgsql_connection:simple_query("create temporary table copy_data (foo integer, bar text)", Conn))
+      },
+      {"Insert data for copy out",
+       ?_assertEqual({{insert,0,5},[]}, pgsql_connection:simple_query("insert into copy_data values (0,'hello'),(1,'world'),(2,'shoe'),(10,'hen'),(42,'so long')", Conn))
+      },
+      {"Copy out",
+       ?_assertMatch({{copy, 5},_}, pgsql_connection:simple_query("copy copy_data to stdout", Conn))
+      },
+      {"Begin copy in",
+       ?_assertEqual({copy_in,[text]}, pgsql_connection:simple_query("copy copy_data from stdin", Conn))
+      },
+      {"Send copy data",
+       ?_assertEqual(ok, pgsql_connection:send_copy_data(<<"100\tcentury\n">>, Conn))
+      },
+      {"End copy",
+       ?_assertEqual({copy,1}, pgsql_connection:send_copy_end(Conn))
+      },
+      {"Check copy data",
+       ?_assertEqual({{select, 1},[{100,<<"century">>}]}, pgsql_connection:simple_query("select * from copy_data where foo = 100", Conn))
+      },
+      {"Copy out with extended query",
+       ?_assertMatch({{copy,6},_}, pgsql_connection:simple_query("copy copy_data to stdout", [], Conn))
+      },
+      {"Begin copy in (2)",
+       ?_assertEqual({copy_in,[text]}, pgsql_connection:simple_query("copy copy_data from stdin", [], Conn))
+      },
+      {"Send copy data (2)",
+       ?_assertEqual(ok, pgsql_connection:send_copy_data(<<"101\tx\n102\ty\n">>, Conn))
+      },
+      {"Send copy data (2b)",
+       ?_assertEqual(ok, pgsql_connection:send_copy_data(<<"103\tz\n">>, Conn))
+      },
+      {"End copy (2)",
+       ?_assertEqual({copy,3}, pgsql_connection:send_copy_end(Conn))
+      },
+      {"Check copy data (2)",
+       ?_assertMatch({{select,3},_}, pgsql_connection:extended_query("select * from copy_data where foo > 100", [], Conn))
+      },
+      {"Can't copy in using extended_query",
+       ?_assertMatch({error, {pgsql_error, _}}, pgsql_connection:extended_query("copy copy_data from stdin", [], Conn))
+      }
+     ]
+     end}.
+
 types_test_() ->
     {setup,
     fun() ->

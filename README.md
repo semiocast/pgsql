@@ -73,6 +73,19 @@ Cancel the current running query. This opens a new connection to cancel the quer
 
 ```extended_query```, ```fold```, ```map```, and ```foreach``` may also be used, but note that Postgres does not permit parameter-binding in COPY queries.
 
+#### copying to a table ####
+
+Begin a copy using `simple_query` (not `extended_query`) to copy from "stdin". Then perform any number of `send_copy_data/2` to transmit data to Postgres' stdin. Finally, `send_copy_end/1` to have Postgres process the data.
+
+```erlang
+{copy_in,_} = Connection:simple_query("COPY people(fn,ln) FROM STDIN"),
+ok = Connection:send_copy_data(<<"Donald\tChamberlin\nRaymond\tBoyce\nMi">>),
+ok = Connection:send_copy_data(<<"chael\tStonebraker\n">>),
+{copy,3} = Connection:send_copy_end()
+```
+
+Using `COPY` is generally the fastest method to bulk-insert data by a large margin.
+
 ### ODBC-like API ###
 
 The driver also has an ODBC-like interface, which is deprecated. It is composed of ```sql_query/2,3,4```, ```param_query/3,4,5``` and utility function ```convert_statement/1```
