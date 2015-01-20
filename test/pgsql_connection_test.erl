@@ -905,6 +905,60 @@ datetime_types_test_() ->
     ]
     end}.
 
+tz_test_() ->
+    {setup,
+    fun() ->
+        {ok, SupPid} = pgsql_connection_sup:start_link(),
+        PosTZConn = pgsql_connection:open("127.0.0.1", "test", "test", "", [{timezone, "UTC+2"}]),
+        NegTZConn = pgsql_connection:open("127.0.0.1", "test", "test", "", [{timezone, "UTC-2"}]),
+        {SupPid, PosTZConn, NegTZConn}
+    end,
+    fun({SupPid, PosTZConn, NegTZConn}) ->
+        pgsql_connection:close(PosTZConn),
+        pgsql_connection:close(NegTZConn),
+        kill_sup(SupPid)
+    end,
+    fun({_SupPid, PosTZConn, NegTZConn}) ->
+    [
+        ?_assertEqual({{select,1},[{{11,4,3}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03'::time", PosTZConn)),
+        ?_assertEqual({{select,1},[{{13,4,3}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03'::timetz", PosTZConn)),
+        ?_assertEqual({{select,1},[{{11,4,3}}]},    pgsql_connection:extended_query("select '2015-01-03 11:04:03'::time", [], PosTZConn)),
+        ?_assertEqual({{select,1},[{{13,4,3}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03'::timetz", [], PosTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{11,4,3}}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03'::timestamp", PosTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{13,4,3}}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03'::timestamptz", PosTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{11,4,3}}}]},    pgsql_connection:extended_query("select '2015-01-03 11:04:03'::timestamp", [], PosTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{13,4,3}}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03'::timestamptz", [], PosTZConn)),
+
+        ?_assertEqual({{select,1},[{{8,4,3}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03+0300'::timetz", PosTZConn)),
+        ?_assertEqual({{select,1},[{{8,4,3}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03+0300'::timetz", [], PosTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{8,4,3}}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03+0300'::timestamptz", PosTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{8,4,3}}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03+0300'::timestamptz", [], PosTZConn)),
+        ?_assertEqual({{select,1},[{{14,4,3}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03-0300'::timetz", PosTZConn)),
+        ?_assertEqual({{select,1},[{{14,4,3}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03-0300'::timetz", [], PosTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{14,4,3}}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03-0300'::timestamptz", PosTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{14,4,3}}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03-0300'::timestamptz", [], PosTZConn)),
+        
+        
+        ?_assertEqual({{select,1},[{{11,4,3}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03'::time", NegTZConn)),
+        ?_assertEqual({{select,1},[{{9,4,3}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03'::timetz", NegTZConn)),
+        ?_assertEqual({{select,1},[{{11,4,3}}]},    pgsql_connection:extended_query("select '2015-01-03 11:04:03'::time", [], NegTZConn)),
+        ?_assertEqual({{select,1},[{{9,4,3}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03'::timetz", [], NegTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{11,4,3}}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03'::timestamp", NegTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{9,4,3}}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03'::timestamptz", NegTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{11,4,3}}}]},    pgsql_connection:extended_query("select '2015-01-03 11:04:03'::timestamp", [], NegTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{9,4,3}}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03'::timestamptz", [], NegTZConn)),
+
+        ?_assertEqual({{select,1},[{{8,4,3}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03+0300'::timetz", NegTZConn)),
+        ?_assertEqual({{select,1},[{{8,4,3}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03+0300'::timetz", [], NegTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{8,4,3}}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03+0300'::timestamptz", NegTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{8,4,3}}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03+0300'::timestamptz", [], NegTZConn)),
+        ?_assertEqual({{select,1},[{{14,4,3}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03-0300'::timetz", NegTZConn)),
+        ?_assertEqual({{select,1},[{{14,4,3}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03-0300'::timetz", [], NegTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{14,4,3}}}]},   pgsql_connection:simple_query("select '2015-01-03 11:04:03-0300'::timestamptz", NegTZConn)),
+        ?_assertEqual({{select,1},[{{{2015,1,3},{14,4,3}}}]},   pgsql_connection:extended_query("select '2015-01-03 11:04:03-0300'::timestamptz", [], NegTZConn))
+    ]
+    end}.
+
 fold_test_() ->
     {setup,
     fun() ->

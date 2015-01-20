@@ -800,50 +800,30 @@ decode_value_text(?DATEOID, Value, _OIDMap) ->
     {Year, Month, Day};
 decode_value_text(?TIMEOID, Value, _OIDMap) ->
     {ok, [Hour, Min], SecsStr} = io_lib:fread("~u:~u:", binary_to_list(Value)),
-    Secs = case lists:member($., SecsStr) of
-        true ->
-            list_to_float(SecsStr);
-        false ->
-            list_to_integer(SecsStr)
-    end,
+    {Secs, 0} = decode_secs_and_tz(SecsStr),
     {Hour, Min, Secs};
 decode_value_text(?TIMETZOID, Value, _OIDMap) ->
     {ok, [Hour, Min], SecsStr0} = io_lib:fread("~u:~u:", binary_to_list(Value)),
-    SecsStr = case string:tokens(SecsStr0, "+-") of
-        [SecsStr1, _TZ] -> SecsStr1;
-        [SecsStr1] -> SecsStr1
-    end,
-    Secs = case lists:member($., SecsStr) of
-        true ->
-            list_to_float(SecsStr);
-        false ->
-            list_to_integer(SecsStr)
-    end,
-    {Hour, Min, Secs};
+    {Secs, TZDelta} = decode_secs_and_tz(SecsStr0),
+    RawTime = {Hour, Min, Secs},
+    adjust_time(RawTime, TZDelta);
 decode_value_text(TypeOID, <<"infinity">>, _OIDMap) when (TypeOID =:= ?TIMESTAMPOID orelse TypeOID =:= ?TIMESTAMPTZOID) -> infinity;
 decode_value_text(TypeOID, <<"-infinity">>, _OIDMap) when (TypeOID =:= ?TIMESTAMPOID orelse TypeOID =:= ?TIMESTAMPTZOID) -> '-infinity';
 decode_value_text(?TIMESTAMPOID, Value, _OIDMap) ->
     {ok, [Year, Month, Day, Hour, Min], SecsStr} = io_lib:fread("~u-~u-~u ~u:~u:", binary_to_list(Value)),
-    Secs = case lists:member($., SecsStr) of
-        true ->
-            list_to_float(SecsStr);
-        false ->
-            list_to_integer(SecsStr)
-    end,
+    {Secs, 0} = decode_secs_and_tz(SecsStr),
     {{Year, Month, Day}, {Hour, Min, Secs}};
 decode_value_text(?TIMESTAMPTZOID, Value, _OIDMap) ->
     {ok, [Year, Month, Day, Hour, Min], SecsStr0} = io_lib:fread("~u-~u-~u ~u:~u:", binary_to_list(Value)),
-    SecsStr = case string:tokens(SecsStr0, "+-") of
-        [SecsStr1, _TZ] -> SecsStr1;
-        [SecsStr1] -> SecsStr1
-    end,
-    Secs = case lists:member($., SecsStr) of
-        true ->
-            list_to_float(SecsStr);
-        false ->
-            list_to_integer(SecsStr)
-    end,
-    {{Year, Month, Day}, {Hour, Min, Secs}};
+    {Secs, TZDelta} = decode_secs_and_tz(SecsStr0),
+    case TZDelta of
+        0 -> {{Year, Month, Day}, {Hour, Min, Secs}};
+        _ ->
+            {{AdjYear, AdjMonth, AdjDay}, {AdjHour, AdjMin, 0}} =
+            calendar:gregorian_seconds_to_datetime(
+                calendar:datetime_to_gregorian_seconds({{Year, Month, Day}, {Hour, Min, 0}}) - (TZDelta * 60)),
+            {{AdjYear, AdjMonth, AdjDay}, {AdjHour, AdjMin, Secs}}
+    end;
 decode_value_text(?POINTOID, Value, _OIDMap) ->
     {P, []} = decode_point_text(binary_to_list(Value)),
     {point, P};
@@ -912,6 +892,32 @@ decode_points_text_aux(Prefix, Suffix, [Before|PStr], PAcc) when Before =:= $, o
 decode_points_text_aux(_, Suffix, [Suffix|After], PAcc) ->
     {lists:reverse(PAcc), After}.
 
+decode_secs_and_tz(SecsStr) ->
+    decode_secs_and_tz0(SecsStr, false, []).
+
+decode_secs_and_tz0([], IsFloat, AccSecs) ->
+    decode_secs_and_tz2(lists:reverse(AccSecs), IsFloat, 0);
+decode_secs_and_tz0([$. | T], _IsFloat, AccSecs) ->
+    decode_secs_and_tz0(T, true, [$. | AccSecs]);
+decode_secs_and_tz0([$+ | T], IsFloat, AccSecs) ->
+    decode_secs_and_tz1(lists:reverse(AccSecs), IsFloat, 1, T);
+decode_secs_and_tz0([$- | T], IsFloat, AccSecs) ->
+    decode_secs_and_tz1(lists:reverse(AccSecs), IsFloat, -1, T);
+decode_secs_and_tz0([Digit | T], IsFloat, AccSecs) ->
+    decode_secs_and_tz0(T, IsFloat, [Digit | AccSecs]).
+
+decode_secs_and_tz1(SecsStr, IsFloat, Sign, TZStr) ->
+    TZDelta = case TZStr of
+        [TZH1, TZH2] -> list_to_integer([TZH1, TZH2]) * 60;
+        [TZH1, TZH2, TZM1, TZM2] -> list_to_integer([TZH1, TZH2]) * 60 + list_to_integer([TZM1, TZM2]);
+        [TZH1, TZH2, $:, TZM1, TZM2] -> list_to_integer([TZH1, TZH2]) * 60 + list_to_integer([TZM1, TZM2])
+    end,
+    decode_secs_and_tz2(SecsStr, IsFloat, Sign * TZDelta).
+
+decode_secs_and_tz2(SecsStr, true, TZDelta) ->
+    {list_to_float(SecsStr), TZDelta};
+decode_secs_and_tz2(SecsStr, false, TZDelta) ->
+    {list_to_integer(SecsStr), TZDelta}.
 
 type_to_oid(Type, OIDMap) ->
     List = gb_trees:to_list(OIDMap),
@@ -967,7 +973,7 @@ decode_value_bin(?UUIDOID, Value, _OIDMap, _IntegerDateTimes) ->
     list_to_binary(UUIDStr);
 decode_value_bin(?DATEOID, <<Date:32/signed-integer>>, _OIDMap, true) -> calendar:gregorian_days_to_date(Date + ?POSTGRESQL_GD_EPOCH);
 decode_value_bin(?TIMEOID, <<Time:64/signed-integer>>, _OIDMap, true) -> decode_time_int(Time);
-decode_value_bin(?TIMETZOID, <<Time:64/signed-integer, _TZ:32/integer>>, _OIDMap, true) -> decode_time_int(Time);
+decode_value_bin(?TIMETZOID, <<Time:64/signed-integer, TZ:32/signed-integer>>, _OIDMap, true) -> decode_time_int(Time, TZ);
 decode_value_bin(?TIMESTAMPOID, <<16#7FFFFFFFFFFFFFFF:64/signed-integer>>, _OIDMap, true) -> infinity;
 decode_value_bin(?TIMESTAMPOID, <<-16#8000000000000000:64/signed-integer>>, _OIDMap, true) -> '-infinity';
 decode_value_bin(?TIMESTAMPOID, <<Timestamp:64/signed-integer>>, _OIDMap, true) -> decode_timestamp_int(Timestamp);
@@ -1083,6 +1089,16 @@ decode_time_int(Time) ->
         0 -> {Hour, Min, Secs0};
         _ -> {Hour, Min, Secs0 + USecs / 1000000}
     end.
+
+decode_time_int(Time, TZ) ->
+    Decoded = decode_time_int(Time),
+    adjust_time(Decoded, - (TZ div 60)).
+
+adjust_time(Time, 0) -> Time;
+adjust_time({Hour, Min, Secs}, TZDelta) when TZDelta > 0 ->
+    {(24 + Hour - (TZDelta div 60)) rem 24, (60 + Min - (TZDelta rem 60)) rem 60, Secs};
+adjust_time({Hour, Min, Secs}, TZDelta) ->
+    {(Hour - (TZDelta div 60)) rem 24, (Min - (TZDelta rem 60)) rem 60, Secs}.
 
 decode_timestamp_int(Timestamp) ->
     TimestampSecs = Timestamp div 1000000,
