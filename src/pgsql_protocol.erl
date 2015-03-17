@@ -318,7 +318,7 @@ encode_array_text([<<_TextSize:32/integer, Text/binary>> | Tail], Acc) ->
     Escaped = escape_array_text(Text),
     encode_array_text(Tail, [Escaped | Acc]);
 encode_array_text([{array, SubArray} | Tail], Acc) when is_list(SubArray) ->
-    SubArrayEncoded = encode_array_text(SubArray, []),
+    {text, <<_TextSize:32/integer, SubArrayEncoded/binary>>} = encode_array_text(SubArray, []),
     encode_array_text(Tail, [SubArrayEncoded | Acc]);
 encode_array_text([], Acc) ->
     StrList = lists:reverse(Acc),
