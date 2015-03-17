@@ -1343,6 +1343,17 @@ invalid_query_test_() ->
                                 {'rollback',[]} = pgsql_connection:simple_query("ROLLBACK", [], 5000, Conn),
                                 R1 = pgsql_connection:extended_query("insert into tmp(id, other) values (6, $1)", ["toto"], Conn),
                                 ?assertEqual({{insert, 0, 1}, []}, R1)
+                        end),
+                    ?_test(begin
+                                ?assertMatch({error, {pgsql_error, _Error}}, pgsql_connection:extended_query("FOO", [], Conn)),
+                                % Empty array forces a Describe command, thus we end the normal sequence with Flush and not with Sync
+                                % Error recovery therefore requires a Sync to get the ReadyForQuery message.
+                                ?assertMatch({error, {pgsql_error, _Error}}, pgsql_connection:extended_query("FOO", [{array, [<<>>]}], Conn)),
+                                % Likewise, cursor mode does send a Flush instead of a Sync after Bind
+                                ?assertMatch({error, {pgsql_error, _Error}}, pgsql_connection:foreach(fun(_Row) -> ok end, "FOO", Conn)),
+                                % connection still usable
+                                R = pgsql_connection:extended_query("insert into tmp(id, other) values (7, $1)", ["toto"], Conn),
+                                ?assertEqual({{insert, 0, 1}, []}, R)
                         end)
                 ]
         end
