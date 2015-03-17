@@ -41,7 +41,7 @@
     foreach/4,
     foreach/5,
     foreach/6,
-	 
+ 
     send_copy_data/2,
     send_copy_end/1,
     
@@ -788,23 +788,23 @@ pgsql_simple_query_loop(Result0, Acc, AsyncT, #state{socket = Socket, subscriber
             DecodedRow = pgsql_protocol:decode_row(Fields, Values, State0#state.oidmap, State0#state.integer_datetimes),
             AccRows1 = [DecodedRow | AccRows0],
             pgsql_simple_query_loop({rows, Fields, AccRows1}, Acc, AsyncT, State0);
-	{ok, #copy_out_response{format = Format}} when Result0 =:= [] ->
-	    Fields = [Format],
-	    State1 = oob_update_oid_map_from_fields_if_required(Fields, State0),
-	    pgsql_simple_query_loop({copy, Fields, []}, Acc, AsyncT, State1);
-	{ok, #copy_data{data = Data}} when is_tuple(Result0) andalso element(1, Result0) =:= copy ->
-	    {copy, Fields, AccData0} = Result0,
-	    AccData1 = [Data | AccData0],
-	    pgsql_simple_query_loop({copy, Fields, AccData1}, Acc, AsyncT, State0);
-	{ok, #copy_done{}} ->
-	    pgsql_simple_query_loop(Result0, Acc, AsyncT, State0);
-	{ok, #copy_in_response{format = Format}} when Result0 =:= [] ->
-	    Fields = [Format],
-	    return_async({copy_in, Fields}, AsyncT, State0);
+        {ok, #copy_out_response{format = Format}} when Result0 =:= [] ->
+            Fields = [Format],
+            State1 = oob_update_oid_map_from_fields_if_required(Fields, State0),
+            pgsql_simple_query_loop({copy, Fields, []}, Acc, AsyncT, State1);
+        {ok, #copy_data{data = Data}} when is_tuple(Result0) andalso element(1, Result0) =:= copy ->
+            {copy, Fields, AccData0} = Result0,
+            AccData1 = [Data | AccData0],
+            pgsql_simple_query_loop({copy, Fields, AccData1}, Acc, AsyncT, State0);
+        {ok, #copy_done{}} ->
+            pgsql_simple_query_loop(Result0, Acc, AsyncT, State0);
+        {ok, #copy_in_response{format = Format}} when Result0 =:= [] ->
+            Fields = [Format],
+            return_async({copy_in, Fields}, AsyncT, State0);
         {ok, #command_complete{command_tag = Tag}} ->
             ResultRows = case Result0 of
                 {rows, _Descs, AccRows} -> lists:reverse(AccRows);
-		{copy, _Descs, AccData} -> lists:reverse(AccData);
+                {copy, _Descs, AccData} -> lists:reverse(AccData);
                 [] -> []
             end,
             DecodedTag = decode_tag(Tag),
@@ -944,7 +944,7 @@ pgsql_extended_query_receive_loop(_LoopState, _Fun, _Acc, _FinalizeFun, _MaxRows
 pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, #state{socket = Socket, subscribers = Subscribers} = State0) ->
     case receive_message(Socket, AsyncT, Subscribers) of
         {ok, Message} ->
-	    pgsql_extended_query_receive_loop0(Message, LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+            pgsql_extended_query_receive_loop0(Message, LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
         {error, _} = ReceiveError ->
             return_async(ReceiveError, AsyncT, State0)
     end.
@@ -1029,8 +1029,8 @@ pgsql_extended_query_receive_loop0(#copy_in_response{}, LoopState, Fun, Acc0, Fi
     Packet = [pgsql_protocol:encode_copy_fail(ErrorMessage),pgsql_protocol:encode_sync_message()],
     Res= SockModule:send(Sock, Packet),
     case Res of
-	ok -> pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
-	{error,_} = SendError -> return_async(SendError, AsyncT, State0)
+        ok -> pgsql_extended_query_receive_loop(LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, State0);
+        {error,_} = SendError -> return_async(SendError, AsyncT, State0)
     end;
 pgsql_extended_query_receive_loop0(#error_response{fields = Fields}, _LoopState, _Fun, _Acc0, _FinalizeFun, 0, AsyncT, State0) ->
     Error = {error, {pgsql_error, Fields}},
@@ -1062,11 +1062,11 @@ pgsql_send_copy_end(From, #state{socket = {SockModule, Sock}} = State0) ->
     State1.
 pgsql_send_copy_end_flush(Result0, #state{socket = Socket, subscribers = Subscribers} = State0) ->
     case receive_message(Socket, sync, Subscribers) of
-	{ok, {command_complete, <<"COPY ",CopyCount/binary>>}} ->
-	    CopyCountNum = ?binary_to_integer(CopyCount),
-	    pgsql_send_copy_end_flush({copy,CopyCountNum}, State0);
-	{ok, {ready_for_query, _}} ->
-	    {Result0, State0#state{current = undefined}}
+        {ok, {command_complete, <<"COPY ",CopyCount/binary>>}} ->
+            CopyCountNum = ?binary_to_integer(CopyCount),
+            pgsql_send_copy_end_flush({copy,CopyCountNum}, State0);
+        {ok, {ready_for_query, _}} ->
+            {Result0, State0#state{current = undefined}}
     end.
 
 flush_until_ready_for_query(Result, AsyncT, #state{socket = Socket, subscribers = Subscribers} = State0) ->
