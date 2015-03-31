@@ -109,7 +109,8 @@
     {'begin' | commit | 'do' | listen | notify | rollback | set | {declare, cursor} | {lock, table}, []}
     | {{insert, integer(), integer()}, rows()}
     | {{copy | delete | fetch | move | select | update, integer()}, rows()}
-    | {{alter | create | drop, atom()} | {start, transaction}, []}.
+    | {{alter | create | drop, atom()} | {start, transaction}, []}
+    | {copy_in, [pgsql_format()]}.
 
 % A gen_tcp or SSL socket.
 -type prim_socket() :: port() | tuple().
