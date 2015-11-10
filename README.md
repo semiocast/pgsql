@@ -22,7 +22,7 @@ In particular, this driver has the following features:
 Compilation
 -----------
 
-Driver can be compiled with [rebar](https://github.com/basho/rebar).
+Driver can be compiled with [rebar](https://github.com/basho/rebar) or [rebar3](http://rebar3.org/).
 
     erlc -o ebin/ src/*.erl
 
