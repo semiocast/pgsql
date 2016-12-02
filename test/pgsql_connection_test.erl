@@ -1184,7 +1184,7 @@ postgression_ssl_test_() ->
                     },
                     {"SSL Connection test",
                     ?_test(begin
-                        Conn = pgsql_connection:open(Host, Database, User, Password, [{port, Port}, {ssl, true}]),
+                        Conn = pgsql_connection:open(Host, Database, User, Password, [{port, Port}, {ssl, true}, {ssl_options, [{verify, verify_none}]}]),
                         ?assertEqual({show, [{<<"on">>}]}, pgsql_connection:simple_query("show ssl", Conn)),
                         pgsql_connection:close(Conn)
                     end)

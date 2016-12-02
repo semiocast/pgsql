@@ -126,6 +126,7 @@
     |   {password, iodata()}                    % default: none
     |   {fetch_oid_map, boolean()}              % default: true
     |   {ssl, boolean()}                        % default: false
+    |   {ssl_options, [ssl:ssl_option()]}       % default: []
     |   {reconnect, boolean()}                  % default: true
     |   {application_name, atom() | iodata()}   % default: node()
     |   {timezone, iodata() | undefined}        % default: undefined (not set)
@@ -592,14 +593,15 @@ pgsql_setup(Sock, #state{options = Options} = State0) ->
             pgsql_setup_ssl(Sock, State0)
     end.
 
-pgsql_setup_ssl(Sock, #state{} = State0) ->
+pgsql_setup_ssl(Sock, #state{options = Options} = State0) ->
     SSLRequestMessage = pgsql_protocol:encode_ssl_request_message(),
     case gen_tcp:send(Sock, SSLRequestMessage) of
         ok ->
             case gen_tcp:recv(Sock, 1) of
                 {ok, <<$S>>} ->
                     % upgrade socket.
-                    case ssl:connect(Sock, [binary, {packet, raw}, {active, false}]) of
+                    SSLOptions = proplists:get_value(ssl_options, Options, []),
+                    case ssl:connect(Sock, [binary, {packet, raw}, {active, false}] ++ SSLOptions) of
                         {ok, SSLSocket} ->
                             pgsql_setup_startup(State0#state{socket = {ssl, SSLSocket}});
                         {error, _} = SSLConnectErr -> SSLConnectErr
