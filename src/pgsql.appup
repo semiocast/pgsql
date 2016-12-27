@@ -1,5 +1,8 @@
-{"26.0.0",
+{"26.0.1",
     [
+    {"26.0.0", [
+         {load_module, pgsql_protocol, soft_purge, soft_purge, []}
+    ]},
     {"26", [
          {load_module, pgsql_protocol, soft_purge, soft_purge, []}
     ]},
@@ -37,6 +40,9 @@
     ]}
     ],
     [
+    {"26.0.0", [
+         {load_module, pgsql_protocol, soft_purge, soft_purge, []}
+    ]},
     {"26", [
          {load_module, pgsql_protocol, soft_purge, soft_purge, []}
     ]},

@@ -934,19 +934,25 @@ decode_array_text(_Type, _OIDMap, <<"}", Next/binary>>, Acc) ->
     {lists:reverse(Acc), Next};
 decode_array_text(Type, OIDMap, <<",", Next/binary>>, Acc) ->
     decode_array_text(Type, OIDMap, Next, Acc);
-decode_array_text(Type, OIDMap, Content, Acc) ->
-    {Count, Next} = decode_array_text_find(Content, 0),
-    {Value, _} = split_binary(Content, Count),
+decode_array_text(Type, OIDMap, Content0, Acc) ->
+    {Value, Rest} = decode_array_text0(Content0, false, []),
     Element = decode_value_text(Type, Value, OIDMap),
-    decode_array_text(Type, OIDMap, Next, [Element|Acc]).
+    decode_array_text(Type, OIDMap, Rest, [Element|Acc]).
 
-decode_array_text_find(<<",", Next/binary>>, Count) ->
-    {Count, Next};
-decode_array_text_find(<<"}", _Next/binary>> = N, Count) ->
-    {Count, N};
-decode_array_text_find(<<_, Next/binary>>, Count) ->
-    decode_array_text_find(Next, Count+1).
-
+decode_array_text0(<<$", Rest/binary>>, false, []) ->
+    decode_array_text0(Rest, true, []);
+decode_array_text0(<<$,, Rest/binary>>, false, Acc) ->
+    {list_to_binary(lists:reverse(Acc)), Rest};
+decode_array_text0(<<$}, _/binary>> = Content, false, Acc) ->
+    {list_to_binary(lists:reverse(Acc)), Content};
+decode_array_text0(<<$", $,, Rest/binary>>, true, Acc) ->
+    {list_to_binary(lists:reverse(Acc)), Rest};
+decode_array_text0(<<$", $}, Rest/binary>>, true, Acc) ->
+    {list_to_binary(lists:reverse(Acc)), <<$}, Rest/binary>>};
+decode_array_text0(<<$\\, C, Rest/binary>>, true, Acc) ->
+    decode_array_text0(Rest, true, [C | Acc]);
+decode_array_text0(<<C, Rest/binary>>, Quoted, Acc) ->
+    decode_array_text0(Rest, Quoted, [C | Acc]).
 
 decode_value_bin(?BOOLOID, <<0>>, _OIDMap, _IntegerDateTimes) -> false;
 decode_value_bin(?BOOLOID, <<1>>, _OIDMap, _IntegerDateTimes) -> true;

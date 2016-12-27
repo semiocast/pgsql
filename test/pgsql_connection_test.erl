@@ -504,6 +504,29 @@ array_types_test_() ->
         end
     }.
 
+% https://github.com/semiocast/pgsql/issues/28
+quoted_array_values_test_() ->
+    {setup,
+        fun() ->
+                {ok, SupPid} = pgsql_connection_sup:start_link(),
+                Conn = pgsql_connection:open("test", "test"),
+                {SupPid, Conn}
+        end,
+        fun({SupPid, Conn}) ->
+                pgsql_connection:close(Conn),
+                kill_sup(SupPid)
+        end,
+        fun({_SupPid, Conn}) ->
+                [
+                    ?_assertEqual({{select,1},[{{array,[<<"foo bar">>]}}]}, pgsql_connection:simple_query("select ARRAY['foo bar'];", Conn)),
+                    ?_assertEqual({{select,1},[{{array,[<<"foo, bar">>]}}]}, pgsql_connection:simple_query("select ARRAY['foo, bar'];", Conn)),
+                    ?_assertEqual({{select,1},[{{array,[<<"foo} bar">>]}}]}, pgsql_connection:simple_query("select ARRAY['foo} bar'];", Conn)),
+                    ?_assertEqual({{select,1},[{{array,[<<"foo \" bar">>]}}]}, pgsql_connection:simple_query("select ARRAY['foo \" bar'];", Conn)),
+                    ?_assertEqual({{select,1},[{{array,[{{2014,1,1},{12,12,12}}]}}]}, pgsql_connection:simple_query("select ARRAY['2014-01-01T12:12:12Z'::timestamp];", Conn))
+                ]
+        end
+    }.
+
 geometric_types_test_() ->
     [{setup,
       fun() ->
