@@ -12,7 +12,6 @@ otp_release:
    - 17.1
    - 17.0
    - R16B03-1
-   - R15B02
 services: postgresql
 before_script:
   - psql -c 'CREATE ROLE test LOGIN; ALTER USER test WITH SUPERUSER;' -U postgres
