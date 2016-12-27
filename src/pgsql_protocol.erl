@@ -155,6 +155,9 @@ encode_format(binary) -> <<1:16/integer>>.
 -spec encode_parameter(any(), pgsql_oid() | undefined, pgsql_oid_map(), boolean()) -> {text | binary, binary()}.
 encode_parameter({array, List}, Type, OIDMap, IntegerDateTimes) ->
     encode_array(List, Type, OIDMap, IntegerDateTimes);
+encode_parameter(Binary, ?TEXTOID, _OIDMap, _IntegerDateTimes) when is_binary(Binary) ->
+    Size = byte_size(Binary),
+    {binary, <<Size:32/integer, Binary/binary>>};
 encode_parameter(Binary, _Type, _OIDMap, _IntegerDateTimes) when is_binary(Binary) ->
     % Encode the binary as text if it is a UUID.
     IsUUID = case Binary of
