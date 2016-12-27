@@ -106,7 +106,7 @@
 -type odbc_result_tuple() :: {updated, n_rows()} | {updated, n_rows(), rows()} | {selected, rows()}.
 
 -type result_tuple() ::
-    {'begin' | commit | 'do' | listen | unlisten | notify | rollback | set | {declare, cursor} | {lock, table}, []}
+    {'begin' | commit | 'do' | listen | unlisten | notify | rollback | set | {declare, cursor} | {lock, table} | comment, []}
     | {{insert, integer(), integer()}, rows()}
     | {{copy | delete | fetch | move | select | update, integer()}, rows()}
     | {{alter | create | drop, atom()} | {start, transaction}, []}
