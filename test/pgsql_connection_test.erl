@@ -1147,7 +1147,7 @@ postgression_ssl_test_() ->
     fun() ->
         ssl:start(),
         {ok, SupPid} = pgsql_connection_sup:start_link(),
-        ok = application:start(inets),
+        ok = application:ensure_started(inets),
         {ok, Result} = httpc:request("http://api.postgression.com/"),
         ConnInfo = case Result of
             {{"HTTP/1.1", 200, "OK"}, _Headers, ConnectionString} ->
