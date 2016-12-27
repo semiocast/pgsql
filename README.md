@@ -120,7 +120,7 @@ Application upgrade file ([pgsql.appup](https://github.com/semiocast/pgsql/blob/
 License
 -------
 
-Copyright (c) 2009-2015, Semiocast.
+Copyright (c) 2009-2016, Semiocast.
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
