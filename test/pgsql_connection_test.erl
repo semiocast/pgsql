@@ -983,6 +983,41 @@ tz_test_() ->
     ]
     end}.
 
+return_descriptions_test_() ->
+    {setup,
+        fun() ->
+                {ok, SupPid} = pgsql_connection_sup:start_link(),
+                Conn = pgsql_connection:open("test", "test"),
+                {SupPid, Conn}
+        end,
+        fun({SupPid, Conn}) ->
+                pgsql_connection:close(Conn),
+                kill_sup(SupPid)
+        end,
+        fun({_SupPid, Conn}) ->
+                [
+                    ?_test(
+                        begin
+                            R = pgsql_connection:simple_query("select 'foo'::text as a", [{return_descriptions, true}], Conn),
+                            ?assertMatch({{select,1},[_], [{<<"foo">>}]}, R),
+                            {{select,1},[D], [{<<"foo">>}]} = R,
+                            ?assert(is_tuple(D)),
+                            ?assertEqual(element(2, D), <<"a">>)
+                        end
+                    ),
+                    ?_test(
+                        begin
+                            R = pgsql_connection:extended_query("select $1::text as a", [<<"foo">>], [{return_descriptions, true}], Conn),
+                            ?assertMatch({{select,1},[_], [{<<"foo">>}]}, R),
+                            {{select,1},[D], [{<<"foo">>}]} = R,
+                            ?assert(is_tuple(D)),
+                            ?assertEqual(element(2, D), <<"a">>)
+                        end
+                    )
+                ]
+        end
+    }.
+
 fold_test_() ->
     {setup,
     fun() ->
