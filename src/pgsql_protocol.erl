@@ -897,7 +897,7 @@ decode_points_text_aux(_, Suffix, [Suffix|After], PAcc) ->
     {lists:reverse(PAcc), After}.
 
 decode_secs_and_tz(SecsStr, DecodeOptions) ->
-    {Secs, TZDelta} = decode_secs_and_tz0(SecsStr, false, []),
+    {Secs, TZDelta} = decode_secs_and_tz0(SecsStr, false, []),
     CastSecs = cast_datetime_secs(Secs, DecodeOptions),
     {CastSecs, TZDelta}.
 
