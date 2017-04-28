@@ -1473,9 +1473,10 @@ cancel_test_() ->
         ?_test(begin
             Self = self(),
             spawn_link(fun() ->
-                SleepResult = pgsql_connection:sql_query("select pg_sleep(2)", Conn),
+                SleepResult = pgsql_connection:simple_query("select pg_sleep(2)", Conn),
                 Self ! {async_result, SleepResult}
             end),
+            timer:sleep(100),
             ?assertEqual(ok, pgsql_connection:cancel(Conn)),
             receive
                 {async_result, R} ->
@@ -1483,7 +1484,79 @@ cancel_test_() ->
                     {error, {pgsql_error, F}} = R,
                     {code, Code} = lists:keyfind(code, 1, F),
                     ?assertEqual(Code, <<"57014">>)
-            end
+            end,
+            {{select, 1}, [{true}]} = pgsql_connection:simple_query("select true", Conn)
+        end)
+    ]
+    end}.
+
+sql_cancel_test_() ->
+    {setup,
+    fun() ->
+        {ok, SupPid} = pgsql_connection_sup:start_link(),
+        Conn1 = pgsql_connection:open("test", "test"),
+        Conn2 = pgsql_connection:open("test", "test"),
+        {SupPid, Conn1, Conn2}
+    end,
+    fun({SupPid, Conn1, Conn2}) ->
+        pgsql_connection:close(Conn1),
+        pgsql_connection:close(Conn2),
+        kill_sup(SupPid)
+    end,
+    fun({_SupPid, Conn1, Conn2}) ->
+    [
+        ?_test(begin
+            {{select, 1}, [{Conn1BackendPid}]} = pgsql_connection:simple_query("SELECT pg_backend_pid()", Conn1),
+            Self = self(),
+            spawn_link(fun() ->
+                SleepResult = pgsql_connection:simple_query("select pg_sleep(2)", Conn1),
+                Self ! {async_result, SleepResult}
+            end),
+            timer:sleep(100),
+            {{select, 1}, [{true}]} = pgsql_connection:extended_query("SELECT pg_cancel_backend($1)", [Conn1BackendPid], Conn2),
+            receive
+                {async_result, R} ->
+                    ?assertMatch({error, {pgsql_error, _}}, R),
+                    {error, {pgsql_error, F}} = R,
+                    {code, Code} = lists:keyfind(code, 1, F),
+                    ?assertEqual(Code, <<"57014">>)
+            end,
+            {{select, 1}, [{NewConn1BackendPid}]} = pgsql_connection:simple_query("SELECT pg_backend_pid()", Conn1),
+            ?assertEqual(NewConn1BackendPid, Conn1BackendPid)
+        end)
+    ]
+    end}.
+
+sql_terminate_test_() ->
+    {setup,
+    fun() ->
+        {ok, SupPid} = pgsql_connection_sup:start_link(),
+        Conn1 = pgsql_connection:open("test", "test"),
+        Conn2 = pgsql_connection:open("test", "test"),
+        {SupPid, Conn1, Conn2}
+    end,
+    fun({SupPid, Conn1, Conn2}) ->
+        pgsql_connection:close(Conn1),
+        pgsql_connection:close(Conn2),
+        kill_sup(SupPid)
+    end,
+    fun({_SupPid, Conn1, Conn2}) ->
+    [
+        ?_test(begin
+            {{select, 1}, [{Conn1BackendPid}]} = pgsql_connection:simple_query("SELECT pg_backend_pid()", Conn1),
+            Self = self(),
+            spawn_link(fun() ->
+                SleepResult = pgsql_connection:simple_query("select pg_sleep(2)", Conn1),
+                Self ! {async_result, SleepResult}
+            end),
+            timer:sleep(100),
+            {{select, 1}, [{true}]} = pgsql_connection:extended_query("SELECT pg_terminate_backend($1)", [Conn1BackendPid], Conn2),
+            receive
+                {async_result, R} ->
+                    ?assertEqual({error, closed}, R)
+            end,
+            {{select, 1}, [{NewConn1BackendPid}]} = pgsql_connection:simple_query("SELECT pg_backend_pid()", Conn1),
+            ?assertNotEqual(NewConn1BackendPid, Conn1BackendPid)
         end)
     ]
     end}.
