@@ -929,6 +929,45 @@ datetime_types_test_() ->
     ]
     end}.
 
+subsecond_datetime_test_() ->
+    {setup,
+    fun() ->
+        {ok, SupPid} = pgsql_connection_sup:start_link(),
+        Conn = pgsql_connection:open("127.0.0.1", "test", "test", "", [{timezone, "UTC"}]),
+        {SupPid, Conn}
+    end,
+    fun({SupPid, Conn}) ->
+        pgsql_connection:close(Conn),
+        kill_sup(SupPid)
+    end,
+    fun({_SupPid, Conn}) ->
+    [
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3.52}}}]}, pgsql_connection:simple_query("select '2012-01-17T10:54:03.52'::timestamptz", Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,4}}}]}, pgsql_connection:simple_query("select '2012-01-17T10:54:03.52'::timestamptz", [{datetime_float_seconds, round}], Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3.52}}}]}, pgsql_connection:simple_query("select '2012-01-17T10:54:03.52'::timestamptz", [{datetime_float_seconds, as_available}], Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3.52}}}]}, pgsql_connection:simple_query("select '2012-01-17T10:54:03.52'::timestamptz", [{datetime_float_seconds, always}], Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3}}}]}, pgsql_connection:simple_query("select '2012-01-17T10:54:03'::timestamptz", [{datetime_float_seconds, round}], Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3}}}]}, pgsql_connection:simple_query("select '2012-01-17T10:54:03'::timestamptz", [{datetime_float_seconds, as_available}], Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3.0}}}]}, pgsql_connection:simple_query("select '2012-01-17T10:54:03'::timestamptz", [{datetime_float_seconds, always}], Conn)),
+
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3.52}}}]}, pgsql_connection:extended_query("select '2012-01-17T10:54:03.52'::timestamptz", [], Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,4}}}]}, pgsql_connection:extended_query("select '2012-01-17T10:54:03.52'::timestamptz", [], [{datetime_float_seconds, round}], Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3.52}}}]}, pgsql_connection:extended_query("select '2012-01-17T10:54:03.52'::timestamptz", [], [{datetime_float_seconds, as_available}], Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3.52}}}]}, pgsql_connection:extended_query("select '2012-01-17T10:54:03.52'::timestamptz", [], [{datetime_float_seconds, always}], Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3}}}]}, pgsql_connection:extended_query("select '2012-01-17T10:54:03'::timestamptz", [], [{datetime_float_seconds, round}], Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3}}}]}, pgsql_connection:extended_query("select '2012-01-17T10:54:03'::timestamptz", [], [{datetime_float_seconds, as_available}], Conn)),
+        ?_assertEqual({{select, 1}, [{{{2012,1,17},{10,54,3.0}}}]}, pgsql_connection:extended_query("select '2012-01-17T10:54:03'::timestamptz", [], [{datetime_float_seconds, always}], Conn)),
+
+        ?_assertEqual({{select, 1}, [{{10,54,3.52}}]}, pgsql_connection:simple_query("select '10:54:03.52'::time", Conn)),
+        ?_assertEqual({{select, 1}, [{{10,54,4}}]}, pgsql_connection:simple_query("select '10:54:03.52'::time", [{datetime_float_seconds, round}], Conn)),
+        ?_assertEqual({{select, 1}, [{{10,54,3.52}}]}, pgsql_connection:simple_query("select '10:54:03.52'::time", [{datetime_float_seconds, as_available}], Conn)),
+        ?_assertEqual({{select, 1}, [{{10,54,3.52}}]}, pgsql_connection:simple_query("select '10:54:03.52'::time", [{datetime_float_seconds, always}], Conn)),
+        ?_assertEqual({{select, 1}, [{{10,54,3}}]}, pgsql_connection:simple_query("select '10:54:03'::time", [{datetime_float_seconds, round}], Conn)),
+        ?_assertEqual({{select, 1}, [{{10,54,3}}]}, pgsql_connection:simple_query("select '10:54:03'::time", [{datetime_float_seconds, as_available}], Conn)),
+        ?_assertEqual({{select, 1}, [{{10,54,3.0}}]}, pgsql_connection:simple_query("select '10:54:03'::time", [{datetime_float_seconds, always}], Conn))
+    ]
+    end}.
+
 tz_test_() ->
     {setup,
     fun() ->

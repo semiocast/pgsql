@@ -798,7 +798,7 @@ pgsql_simple_query_loop(Result0, Acc, AsyncT, QueryOptions, #state{socket = Sock
             pgsql_simple_query_loop({rows, Fields, []}, Acc, AsyncT, QueryOptions, State1);
         {ok, #data_row{values = Values}} when is_tuple(Result0) andalso element(1, Result0) =:= rows ->
             {rows, Fields, AccRows0} = Result0,
-            DecodedRow = pgsql_protocol:decode_row(Fields, Values, State0#state.oidmap, State0#state.integer_datetimes),
+            DecodedRow = pgsql_protocol:decode_row(Fields, Values, State0#state.oidmap, [{integer_datetimes, State0#state.integer_datetimes} | QueryOptions]),
             AccRows1 = [DecodedRow | AccRows0],
             pgsql_simple_query_loop({rows, Fields, AccRows1}, Acc, AsyncT, QueryOptions, State0);
         {ok, #copy_out_response{format = Format}} when Result0 =:= [] ->
@@ -1008,7 +1008,7 @@ pgsql_extended_query_receive_loop0(#row_description{fields = Fields}, row_descri
     State1 = oob_update_oid_map_from_fields_if_required(Fields, State0),
     pgsql_extended_query_receive_loop({rows, Fields}, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, QueryOptions, State1);
 pgsql_extended_query_receive_loop0(#data_row{values = Values}, {rows, Fields} = LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, QueryOptions, State0) ->
-    DecodedRow = pgsql_protocol:decode_row(Fields, Values, State0#state.oidmap, State0#state.integer_datetimes),
+    DecodedRow = pgsql_protocol:decode_row(Fields, Values, State0#state.oidmap, [{integer_datetimes, State0#state.integer_datetimes} | QueryOptions]),
     Acc1 = Fun(DecodedRow, Fields, QueryOptions, Acc0),
     pgsql_extended_query_receive_loop(LoopState, Fun, Acc1, FinalizeFun, MaxRowsStep, AsyncT, QueryOptions, State0);
 pgsql_extended_query_receive_loop0(#copy_out_response{format = Format}, _LoopState, Fun, Acc0, FinalizeFun, MaxRowsStep, AsyncT, QueryOptions, State0) ->
