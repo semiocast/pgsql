@@ -1057,6 +1057,35 @@ return_descriptions_test_() ->
         end
     }.
 
+return_maps_test_() ->
+    {setup,
+        fun() ->
+                {ok, SupPid} = pgsql_connection_sup:start_link(),
+                Conn = pgsql_connection:open("test", "test"),
+                {SupPid, Conn}
+        end,
+        fun({SupPid, Conn}) ->
+                pgsql_connection:close(Conn),
+                kill_sup(SupPid)
+        end,
+        fun({_SupPid, Conn}) ->
+                [
+                    ?_test(
+                        begin
+                            R = pgsql_connection:simple_query("select 'foo'::text as a", [{return_maps, true}], Conn),
+                            ?assertMatch({{select,1}, [#{<<"a">> => <<"foo">>}]}, R)
+                        end
+                    ),
+                    ?_test(
+                        begin
+                            R = pgsql_connection:extended_query("select $1::text as a", [<<"foo">>], [{return_maps, true}], Conn),
+                            ?assertMatch({{select,1}, [#{<<"a">> => <<"foo">>}]}, R)
+                        end
+                    )
+                ]
+        end
+    }.
+
 fold_test_() ->
     {setup,
     fun() ->
