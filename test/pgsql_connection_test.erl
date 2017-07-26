@@ -1073,13 +1073,13 @@ return_maps_test_() ->
                     ?_test(
                         begin
                             R = pgsql_connection:simple_query("select 'foo'::text as a", [{return_maps, true}], Conn),
-                            ?assertMatch({{select,1}, [#{<<"a">> => <<"foo">>}]}, R)
+                            ?assertMatch({{select,1}, [#{<<"a">> := <<"foo">>}]}, R)
                         end
                     ),
                     ?_test(
                         begin
                             R = pgsql_connection:extended_query("select $1::text as a", [<<"foo">>], [{return_maps, true}], Conn),
-                            ?assertMatch({{select,1}, [#{<<"a">> => <<"foo">>}]}, R)
+                            ?assertMatch({{select,1}, [#{<<"a">> := <<"foo">>}]}, R)
                         end
                     )
                 ]
