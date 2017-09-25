@@ -21,8 +21,8 @@ before_install:
 matrix:
   include:
     - otp_release: 17.1
-      env: TRAVIS_POSTGRESQL_VERSION=9.1
-    - otp_release: 17.1
       env: TRAVIS_POSTGRESQL_VERSION=9.2
     - otp_release: 17.1
       env: TRAVIS_POSTGRESQL_VERSION=9.3
+    - otp_release: 17.1
+      env: TRAVIS_POSTGRESQL_VERSION=9.4
