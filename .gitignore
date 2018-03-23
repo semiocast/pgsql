@@ -3,3 +3,5 @@ ebin
 .DS_Store
 .persistent_state
 target
+rebar.lock
+_build
