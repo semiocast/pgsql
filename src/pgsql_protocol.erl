@@ -969,7 +969,10 @@ decode_array_text(Type, OIDMap, DecodeOptions, <<",", Next/binary>>, Acc) ->
     decode_array_text(Type, OIDMap, DecodeOptions, Next, Acc);
 decode_array_text(Type, OIDMap, DecodeOptions, Content0, Acc) ->
     {Value, Rest} = decode_array_text0(Content0, false, []),
-    Element = decode_value_text(Type, Value, OIDMap, DecodeOptions),
+    Element = case Value of
+        <<"NULL">> -> null;
+        _ -> decode_value_text(Type, Value, OIDMap, DecodeOptions)
+    end,
     decode_array_text(Type, OIDMap, DecodeOptions, Rest, [Element|Acc]).
 
 decode_array_text0(<<$", Rest/binary>>, false, []) ->
