@@ -155,13 +155,13 @@
       options           :: open_options(),
       socket            :: socket() | closed,   %% gen_tcp or ssl socket
       subscribers       :: [{pid(), reference()}],
-      backend_procid    :: integer(),
-      backend_secret    :: integer(),
-      integer_datetimes :: boolean(),
+      backend_procid    :: integer() | undefined,
+      backend_secret    :: integer() | undefined,
+      integer_datetimes :: boolean() | undefined,
       oidmap            :: pgsql_oid_map(),
       current           :: {tuple(), reference(), from()} | undefined | {tuple(), from()},
       pending           :: [{tuple(), reference(), from()}] | [{tuple(), from()}],
-      statement_timeout :: non_neg_integer()    %% to pipeline statements with timeouts, currently unused
+      statement_timeout :: non_neg_integer() | undefined    %% to pipeline statements with timeouts, currently unused
      }).
 
 -define(MESSAGE_HEADER_SIZE, 5).
