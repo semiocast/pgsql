@@ -1256,21 +1256,23 @@ json_types_test_() ->
                 [?_test(begin
                     {updated, 1} = pgsql_connection:sql_query("create temporary table tmp (id integer primary key, a_json json, b_json json)", Conn),
                     {{insert,0,1}, []} = pgsql_connection:extended_query("insert into tmp (id, b_json) values ($1, $2)", [2, {json, <<"[{\"a\":\"foo\"},{\"b\":\"bar\"},{\"c\":\"baz\"}]">>}], Conn),
-                    ?_assertEqual({{select,1},[{{json,<<"[{\"a\":\"foo\"},{\"b\":\"bar\"},{\"c\":\"baz\"}]">>}}]}, pgsql_connection:simple_query("select '[{\"a\":\"foo\"},{\"b\":\"bar\"},{\"c\":\"baz\"}]'::json", Conn)),
-                            ?_assertEqual({{select,1},[{{json,<<"[{\"a\": \"foo\"}, {\"b\": \"bar\"}, {\"c\": \"baz\"}]">>}}]}, pgsql_connection:simple_query("select b_json from tmp where id = 2", Conn))
-                        end),
-                 ?_test(begin
-                    %% only run jsonb tests on 9.4 in travis
-                    case os:getenv("TRAVIS_POSTGRESQL_VERSION") of
-                        "9.4" ->
+                    ?assertEqual({{select,1},[{{json,<<"[{\"a\":\"foo\"},{\"b\":\"bar\"},{\"c\":\"baz\"}]">>}}]}, pgsql_connection:simple_query("select '[{\"a\":\"foo\"},{\"b\":\"bar\"},{\"c\":\"baz\"}]'::json", Conn)),
+                    ?assertEqual({{select,1},[{{json,<<"[{\"a\":\"foo\"},{\"b\":\"bar\"},{\"c\":\"baz\"}]">>}}]}, pgsql_connection:simple_query("select b_json from tmp where id = 2", Conn)),
+                    ?assertEqual({{select,1},[{{json,<<"[{\"a\":\"foo\"},{\"b\":\"bar\"},{\"c\":\"baz\"}]">>}}]}, pgsql_connection:extended_query("select b_json from tmp where id = $1", [2], Conn))
+                end),
+                ?_test(begin
+                    %% only run jsonb tests if type exists.
+                    case pgsql_connection:simple_query("SELECT 1 FROM pg_type WHERE typname = 'jsonb'", Conn) of
+                        {{select, 1}, [{1}]} ->
                             {updated, 1} = pgsql_connection:sql_query("create temporary table tmp_b (id integer primary key, a_json jsonb, b_json json)", Conn),
-                            ?_assertEqual({{select,1},[{{jsonb,<<"[{\"a\": \"foo\"}, {\"b\": \"bar\"}, {\"c\": \"baz\"}]">>}}]}, pgsql_connection:simple_query("select '[{\"a\":\"foo\"},{\"b\":\"bar\"},{\"c\":\"baz\"}]'::jsonb", Conn)),
+                            ?assertEqual({{select,1},[{{jsonb,<<"[{\"a\": \"foo\"}, {\"b\": \"bar\"}, {\"c\": \"baz\"}]">>}}]}, pgsql_connection:simple_query("select '[{\"a\":\"foo\"},{\"b\":\"bar\"},{\"c\":\"baz\"}]'::jsonb", Conn)),
                             {{insert,0,1}, []} = pgsql_connection:extended_query("insert into tmp_b (id, a_json) values ($1, $2)", [1, {jsonb, <<"[{\"a\":\"foo\"},{\"b\":\"bar\"},{\"c\":\"baz\"}]">>}], Conn),
-                            ?_assertEqual({{select,1},[{{jsonb,<<"[{\"a\": \"foo\"}, {\"b\": \"bar\"}, {\"c\": \"baz\"}]">>}}]}, pgsql_connection:simple_query("select a_json from tmp_b where id = 1", Conn));
-                        _ ->
+                            ?assertEqual({{select,1},[{{jsonb,<<"[{\"a\": \"foo\"}, {\"b\": \"bar\"}, {\"c\": \"baz\"}]">>}}]}, pgsql_connection:simple_query("select a_json from tmp_b where id = 1", Conn)),
+                            ?assertEqual({{select,1},[{{jsonb,<<"[{\"a\": \"foo\"}, {\"b\": \"bar\"}, {\"c\": \"baz\"}]">>}}]}, pgsql_connection:extended_query("select a_json from tmp_b where id = $1", [1], Conn));
+                        {{select, 0}, []} ->
                             ok
                     end
-                        end)
+                end)
                 ]
         end
     }.
