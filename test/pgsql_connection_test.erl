@@ -1303,7 +1303,12 @@ inet_cidr_type_test_() ->
                 ?_assertEqual({{select,1},[{{cidr, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}, 32}}]}, pgsql_connection:extended_query("select $1::cidr", [{cidr, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}, 32}], Conn)),
                 ?_assertEqual({{select,1},[{{cidr, {10,20,30,0}, 24}}]}, pgsql_connection:extended_query("select $1::cidr", [{cidr, {10,20,30,0}, 24}], Conn)),
                 ?_assertEqual({{select,1},[{{inet, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}}}]}, pgsql_connection:extended_query("select $1::inet", [{inet, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}}], Conn)),
-                ?_assertEqual({{select,1},[{{inet, {10,20,30,40}}}]}, pgsql_connection:extended_query("select $1::inet", [{inet, {10,20,30,40}}], Conn))
+                ?_assertEqual({{select,1},[{{inet, {10,20,30,40}}}]}, pgsql_connection:extended_query("select $1::inet", [{inet, {10,20,30,40}}], Conn)),
+
+                ?_assertEqual({{select,1},[{{cidr, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}, 32}}]}, pgsql_connection:extended_query("select $1::cidr", ["2403:c380::/32"], Conn)),
+                ?_assertEqual({{select,1},[{{cidr, {10,20,30,0}, 24}}]}, pgsql_connection:extended_query("select $1::cidr", ["10.20.30.0/24"], Conn)),
+                ?_assertEqual({{select,1},[{{inet, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}}}]}, pgsql_connection:extended_query("select $1::inet", ["2403:c380::"], Conn)),
+                ?_assertEqual({{select,1},[{{inet, {10,20,30,40}}}]}, pgsql_connection:extended_query("select $1::inet", ["10.20.30.40"], Conn))
             ]
         end
     }.
