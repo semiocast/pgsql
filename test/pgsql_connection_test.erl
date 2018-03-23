@@ -1277,6 +1277,37 @@ json_types_test_() ->
         end
     }.
 
+inet_cidr_type_test_() ->
+    {setup,
+        fun() ->
+                {ok, SupPid} = pgsql_connection_sup:start_link(),
+                Conn = pgsql_connection:open("test", "test"),
+                {SupPid, Conn}
+        end,
+        fun({SupPid, Conn}) ->
+                pgsql_connection:close(Conn),
+                kill_sup(SupPid)
+        end,
+        fun({_SupPid, Conn}) ->
+            [
+                ?_assertEqual({{select,1},[{{cidr, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}, 32}}]}, pgsql_connection:simple_query("select '2403:c380::/32'::cidr", Conn)),
+                ?_assertEqual({{select,1},[{{cidr, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}, 32}}]}, pgsql_connection:extended_query("select '2403:c380::/32'::cidr", [], Conn)),
+                ?_assertEqual({{select,1},[{{cidr, {10,20,30,0}, 24}}]}, pgsql_connection:simple_query("select '10.20.30.0/24'::cidr", Conn)),
+                ?_assertEqual({{select,1},[{{cidr, {10,20,30,0}, 24}}]}, pgsql_connection:extended_query("select '10.20.30.0/24'::cidr", [], Conn)),
+
+                ?_assertEqual({{select,1},[{{inet, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}}}]}, pgsql_connection:simple_query("select '2403:c380::'::inet", Conn)),
+                ?_assertEqual({{select,1},[{{inet, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}}}]}, pgsql_connection:extended_query("select '2403:c380::'::inet", [], Conn)),
+                ?_assertEqual({{select,1},[{{inet, {10,20,30,40}}}]}, pgsql_connection:simple_query("select '10.20.30.40'::inet", Conn)),
+                ?_assertEqual({{select,1},[{{inet, {10,20,30,40}}}]}, pgsql_connection:extended_query("select '10.20.30.40'::inet", [], Conn)),
+
+                ?_assertEqual({{select,1},[{{cidr, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}, 32}}]}, pgsql_connection:extended_query("select $1::cidr", [{cidr, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}, 32}], Conn)),
+                ?_assertEqual({{select,1},[{{cidr, {10,20,30,0}, 24}}]}, pgsql_connection:extended_query("select $1::cidr", [{cidr, {10,20,30,0}, 24}], Conn)),
+                ?_assertEqual({{select,1},[{{inet, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}}}]}, pgsql_connection:extended_query("select $1::inet", [{inet, {16#2403, 16#c380, 0, 0, 0, 0, 0, 0}}], Conn)),
+                ?_assertEqual({{select,1},[{{inet, {10,20,30,40}}}]}, pgsql_connection:extended_query("select $1::inet", [{inet, {10,20,30,40}}], Conn))
+            ]
+        end
+    }.
+
 
 constraint_violation_test_() ->
     {setup,

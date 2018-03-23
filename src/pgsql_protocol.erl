@@ -149,8 +149,10 @@ encode_format(binary) -> <<1:16/integer>>.
 
 %%--------------------------------------------------------------------
 %% @doc Encode a parameter.
-%% All parameters are currently encoded in text format except binaries that are
-%% encoded as binaries.
+%% Most parameters are encoded in text format.
+%% Binaries are passed as binaries, unless they look like UUIDs. This is
+%% suitable for text and other types.
+%% JSON and INET/CIDR types are encoded as binaries.
 %%
 -spec encode_parameter(any(), pgsql_oid() | undefined, pgsql_oid_map(), boolean()) -> {text | binary, binary()}.
 encode_parameter({array, List}, Type, OIDMap, IntegerDateTimes) ->
@@ -237,6 +239,22 @@ encode_parameter({polygon, [_|_]=PList}, _Type, _OIDMap, _IntegerDateTimes) ->
     Binary = encode_points_text($(, $), PList),
     Size = byte_size(Binary),
     {text, <<Size:32/integer, Binary/binary>>};
+encode_parameter({inet, {X, Y, Z, T}}, _Type, _OIDMap, _IntegerDateTimes) ->
+    Binary = <<2, 32, 0, 4, X, Y, Z, T>>,
+    Size = byte_size(Binary),
+    {binary, <<Size:32/integer, Binary/binary>>};
+encode_parameter({inet, {A, B, C, D, E, F, G, H}}, _Type, _OIDMap, _IntegerDateTimes) ->
+    Binary = <<3, 128, 0, 16, A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>>,
+    Size = byte_size(Binary),
+    {binary, <<Size:32/integer, Binary/binary>>};
+encode_parameter({cidr, {X, Y, Z, T}, Bits}, _Type, _OIDMap, _IntegerDateTimes) ->
+    Binary = <<2, Bits, 1, 4, X, Y, Z, T>>,
+    Size = byte_size(Binary),
+    {binary, <<Size:32/integer, Binary/binary>>};
+encode_parameter({cidr, {A, B, C, D, E, F, G, H}, Bits}, _Type, _OIDMap, _IntegerDateTimes) ->
+    Binary = <<3, Bits, 1, 16, A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>>,
+    Size = byte_size(Binary),
+    {binary, <<Size:32/integer, Binary/binary>>};
 encode_parameter(Value, _Type, _OIDMap, _IntegerDateTimes) ->
     throw({badarg, Value}).
 
@@ -870,6 +888,14 @@ decode_value_text(TypeOID, Value, _OIDMap, _DecodeOptions) when TypeOID =:= ?TEX
             orelse TypeOID =:= ?BPCHAROID
             orelse TypeOID =:= ?VARCHAROID
              -> Value;
+decode_value_text(?CIDROID, Value, _OIDMap, _DecodeOptions) ->
+    [AddrStr, BitSizeStr] = binary:split(Value, <<"/">>),
+    {ok, Addr} = inet:parse_address(binary_to_list(AddrStr)),
+    BitSize = binary_to_integer(BitSizeStr),
+    {cidr, Addr, BitSize};
+decode_value_text(?INETOID, Value, _OIDMap, _DecodeOptions) ->
+    {ok, Addr} = inet:parse_address(binary_to_list(Value)),
+    {inet, Addr};
 decode_value_text(TypeOID, Value, OIDMap, DecodeOptions) ->
     Type = decode_oid(TypeOID, OIDMap),
     if not is_atom(Type) -> {Type, Value};
@@ -1028,6 +1054,10 @@ decode_value_bin(?PATHOID, <<1:8/unsigned-integer, PointsBin/binary>>, _OIDMap, 
 decode_value_bin(?PATHOID, <<0:8/unsigned-integer, PointsBin/binary>>, _OIDMap, _DecodeOptions) -> {path, open, decode_points_bin(PointsBin)};
 decode_value_bin(?POLYGONOID, Points, _OIDMap, _DecodeOptions) -> {polygon, decode_points_bin(Points)};
 decode_value_bin(?VOIDOID, <<>>, _OIDMap, _DecodeOptions) -> null;
+decode_value_bin(?CIDROID, <<2, Bits, 1, 4, X, Y, Z, T>>, _OIDMap, _DecodeOptions) -> {cidr, {X, Y, Z, T}, Bits}; % IPv4 (2 == inet)
+decode_value_bin(?CIDROID, <<3, Bits, 1, 16, A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>>, _OIDMap, _DecodeOptions) -> {cidr, {A, B, C, D, E, F, G, H}, Bits}; % IPv6 (3 == inet6)
+decode_value_bin(?INETOID, <<2, 32, 0, 4, X, Y, Z, T>>, _OIDMap, _DecodeOptions) -> {inet, {X, Y, Z, T}}; % IPv4 (2 == inet)
+decode_value_bin(?INETOID, <<3, 128, 0, 16, A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>>, _OIDMap, _DecodeOptions) -> {inet, {A, B, C, D, E, F, G, H}}; % IPv6 (3 == inet6)
 decode_value_bin(TypeOID, Value, OIDMap, DecodeOptions) ->
     Type = decode_oid(TypeOID, OIDMap),
     if not is_atom(Type) -> {Type, Value};
