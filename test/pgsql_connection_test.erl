@@ -1276,57 +1276,6 @@ json_types_test_() ->
     }.
 
 
-postgression_ssl_test_() ->
-    {setup,
-    fun() ->
-        ssl:start(),
-        {ok, SupPid} = pgsql_connection_sup:start_link(),
-        ok = application:ensure_started(inets),
-        {ok, Result} = httpc:request("http://api.postgression.com/"),
-        ConnInfo = case Result of
-            {{"HTTP/1.1", 200, "OK"}, _Headers, ConnectionString} ->
-                {match, [User, Password, Host, PortStr, Database]} =
-                    re:run(ConnectionString, "^postgres://(.*):(.*)@(.*):([0-9]+)/(.*)$", [{capture, all_but_first, list}]),
-                Port = list_to_integer(PortStr),
-                {Host, Database, User, Password, Port};
-            {{"HTTP/1.1", 500, HTTPStatus}, _Headers, FailureDescription} ->
-                ?debugFmt("Postgression unavailable: ~s\n~s\n", [HTTPStatus, FailureDescription]),
-                unavailable
-        end,
-        {SupPid, ConnInfo}
-    end,
-    fun({SupPid, _ConnInfo}) ->
-        kill_sup(SupPid),
-        ssl:stop()
-    end,
-    fun({_SupPid, ConnInfo}) ->
-        case ConnInfo of
-            unavailable ->
-                ?debugMsg("Skipped.\n"),
-                [];
-            {Host, Database, User, Password, Port} ->
-                [
-                    {"Postgression requires SSL",
-                    ?_test(begin
-                        try
-                            pgsql_connection:open(Host, Database, User, Password, [{port, Port}]),
-                            ?assert(false)
-                        catch throw:{pgsql_error, _} ->
-                            ok
-                        end
-                    end)
-                    },
-                    {"SSL Connection test",
-                    ?_test(begin
-                        Conn = pgsql_connection:open(Host, Database, User, Password, [{port, Port}, {ssl, true}, {ssl_options, [{verify, verify_none}]}]),
-                        ?assertEqual({show, [{<<"on">>}]}, pgsql_connection:simple_query("show ssl", Conn)),
-                        pgsql_connection:close(Conn)
-                    end)
-                    }
-                ]
-        end
-    end}.
-
 constraint_violation_test_() ->
     {setup,
     fun() ->
