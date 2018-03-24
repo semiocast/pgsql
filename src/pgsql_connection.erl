@@ -101,7 +101,7 @@
 -type pgsql_connection() :: {pgsql_connection, pid()}.
 
 -type n_rows() :: integer().
--type row() :: tuple().
+-type row() :: tuple() | map().
 -type rows() :: [row()].
 -type odbc_result_tuple() :: {updated, n_rows()} | {updated, n_rows(), rows()} | {selected, rows()}.
 % Column descriptions are returned with return_descriptions query option, an
@@ -144,6 +144,7 @@
         {max_rows_step, non_neg_integer()}      % default: ?DEFAULT_MAX_ROWS_STEP
     |   {retry, boolean()}                      % default: false
     |   {return_descriptions, boolean()}        % default: false
+    |   {return_maps, boolean()}                % default: false
     |   {datetime_float_seconds, round | always | as_available} % default: as_available
     |   proplists:property().                   % undocumented.
 -type query_options() :: [query_option()].

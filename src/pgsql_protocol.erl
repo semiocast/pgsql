@@ -798,9 +798,20 @@ decode_row(Descs, Values, OIDMap, DecodeOptions) ->
 
 decode_row0([Desc | DescsT], [Value | ValuesT], OIDMap, DecodeOptions, Acc) ->
     DecodedValue = decode_value(Desc, Value, OIDMap, DecodeOptions),
-    decode_row0(DescsT, ValuesT, OIDMap, DecodeOptions, [DecodedValue | Acc]);
-decode_row0([], [], _OIDMap, _DecodeOptions, Acc) ->
-    list_to_tuple(lists:reverse(Acc)).
+    case proplists:get_bool(return_maps, DecodeOptions) of
+        true ->
+            #row_description_field{name = FieldName} = Desc,
+            decode_row0(DescsT, ValuesT, OIDMap, DecodeOptions, [{FieldName, DecodedValue} | Acc]);
+        false ->
+            decode_row0(DescsT, ValuesT, OIDMap, DecodeOptions, [DecodedValue | Acc])
+    end;
+decode_row0([], [], _OIDMap, DecodeOptions, Acc) ->
+    case proplists:get_bool(return_maps, DecodeOptions) of
+        true ->
+            maps:from_list(Acc);
+        false ->
+            list_to_tuple(lists:reverse(Acc))
+    end.
 
 decode_value(_Desc, null, _OIDMap, _DecodeOptions) -> null;
 decode_value(#row_description_field{data_type_oid = TypeOID, format = text}, Value, OIDMap, DecodeOptions) ->
