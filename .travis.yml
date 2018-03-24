@@ -1,8 +1,15 @@
 language: erlang
 otp_release:
+   - 20.3
+   - 20.2
+   - 20.1
+   - 20.0
+   - 19.3
+   - 19.2
    - 19.1
    - 19.0
    - 18.3
+   - 18.2.1
    - 18.2
    - 18.1
    - 18.0
@@ -11,7 +18,6 @@ otp_release:
    - 17.3
    - 17.1
    - 17.0
-   - R16B03-1
 services: postgresql
 before_script:
   - psql -c 'CREATE ROLE test LOGIN; ALTER USER test WITH SUPERUSER;' -U postgres
@@ -20,9 +26,11 @@ before_install:
   - "test x\"$TRAVIS_POSTGRESQL_VERSION\" = x\"\" || (sudo service postgresql stop && sudo service postgresql start $TRAVIS_POSTGRESQL_VERSION)"
 matrix:
   include:
-    - otp_release: 17.1
+    - otp_release: 20.3
       env: TRAVIS_POSTGRESQL_VERSION=9.2
-    - otp_release: 17.1
-      env: TRAVIS_POSTGRESQL_VERSION=9.3
-    - otp_release: 17.1
+    - otp_release: 20.3
       env: TRAVIS_POSTGRESQL_VERSION=9.4
+    - otp_release: 20.3
+      env: TRAVIS_POSTGRESQL_VERSION=9.5
+    - otp_release: 20.3
+      env: TRAVIS_POSTGRESQL_VERSION=10.1
