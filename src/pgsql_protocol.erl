@@ -261,6 +261,9 @@ encode_parameter({cidr, {A, B, C, D, E, F, G, H}, Bits}, _Type, _OIDMap, _Intege
     Binary = <<3, Bits, 1, 16, A:16, B:16, C:16, D:16, E:16, F:16, G:16, H:16>>,
     Size = byte_size(Binary),
     {binary, <<Size:32/integer, Binary/binary>>};
+encode_parameter({Atom, Value}, _Type, _OIDMap, _IntegerDateTimes) when is_atom(Atom), is_binary(Value) ->
+    Size = byte_size(Value),
+    {text, <<Size:32/integer, Value/binary>>};
 encode_parameter(Value, _Type, _OIDMap, _IntegerDateTimes) ->
     throw({badarg, Value}).
 

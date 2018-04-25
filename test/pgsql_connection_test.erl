@@ -1428,6 +1428,7 @@ custom_enum_native_test_() ->
             ?assertMatch({{select, 1}, [{{mood, <<"sad">>}}]}, pgsql_connection:simple_query("select 'sad'::mood;", Conn)),
             ?assertMatch({{select, 1}, [{{mood, <<"sad">>}}]}, pgsql_connection:extended_query("select 'sad'::mood;", [], Conn)),
             ?assertMatch({{select, 1}, [{{mood, <<"sad">>}}]}, pgsql_connection:extended_query("select $1::mood;", [<<"sad">>], Conn)),
+            ?assertMatch({{select, 1}, [{{mood, <<"sad">>}}]}, pgsql_connection:extended_query("select $1::mood;", [{mood, <<"sad">>}], Conn)),
             ?assertMatch({{select, 1}, [{{array, [{mood, <<"sad">>}]}}]}, pgsql_connection:simple_query("select '{sad}'::mood[];", Conn)),
             ?assertMatch({{select, 1}, [{{array, [{mood, <<"sad">>}]}}]}, pgsql_connection:extended_query("select $1::mood[];", [{array, [<<"sad">>]}], Conn))
         end)
