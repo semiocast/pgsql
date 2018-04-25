@@ -201,6 +201,12 @@ encode_parameter(true, _Type, _OIDMap, _IntegerDateTimes) ->
     {text, <<1:32/integer, $t>>};
 encode_parameter(false, _Type, _OIDMap, _IntegerDateTimes) ->
     {text, <<1:32/integer, $f>>};
+encode_parameter('NaN', _Type, _OIDMap, _IntegerDateTimes) ->
+    {text, <<3:32/integer, "NaN">>};
+encode_parameter('Infinity', _Type, _OIDMap, _IntegerDateTimes) ->
+    {text, <<8:32/integer, "Infinity">>};
+encode_parameter('-Infinity', _Type, _OIDMap, _IntegerDateTimes) ->
+    {text, <<9:32/integer, "-Infinity">>};
 encode_parameter({{Year, Month, Day}, {Hour, Min, Sec}}, Type, OIDMap, IntegerDateTimes) when is_float(Sec) ->
     encode_parameter(lists:flatten(io_lib:format("~4.10.0B-~2.10.0B-~2.10.0BT~2.10.0B:~2.10.0B:~9.6.0f", [Year, Month, Day, Hour, Min, Sec])), Type, OIDMap, IntegerDateTimes);
 encode_parameter({{Year, Month, Day}, {Hour, Min, Sec}}, Type, OIDMap, IntegerDateTimes) ->

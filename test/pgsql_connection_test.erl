@@ -736,7 +736,10 @@ float_types_test_() ->
         ?_assertEqual({selected, [{'-Infinity'}]}, pgsql_connection:sql_query("select '-Infinity'::float4", Conn)),
         ?_assertEqual({selected, [{'-Infinity'}]}, pgsql_connection:sql_query("select '-Infinity'::float8", Conn)),
         ?_assertEqual({selected, [{'-Infinity'}]}, pgsql_connection:param_query("select '-Infinity'::float4", [], Conn)),
-        ?_assertEqual({selected, [{'-Infinity'}]}, pgsql_connection:param_query("select '-Infinity'::float8", [], Conn))
+        ?_assertEqual({selected, [{'-Infinity'}]}, pgsql_connection:param_query("select '-Infinity'::float8", [], Conn)),
+
+        ?_assertEqual({{select, 1}, [{'Infinity'}]}, pgsql_connection:extended_query("select $1::float8", ['Infinity'], Conn)),
+        ?_assertEqual({{select, 1}, [{'-Infinity'}]}, pgsql_connection:extended_query("select $1::float8", ['-Infinity'], Conn))
     ]
     end}.
 
@@ -862,7 +865,11 @@ numeric_types_test_() ->
         ?_assertEqual({{select, 1}, [{0.0}]}, pgsql_connection:extended_query("select 0.0::numeric", [], Conn)),
         ?_assertEqual({{select, 1}, [{0.1}]}, pgsql_connection:extended_query("select 0.1::numeric", [], Conn)),
         ?_assertEqual({{select, 1}, [{0.00001}]}, pgsql_connection:extended_query("select 0.00001::numeric", [], Conn)),
-        ?_assertEqual({{select, 1}, [{0.0000001}]}, pgsql_connection:extended_query("select 0.0000001::numeric", [], Conn))
+        ?_assertEqual({{select, 1}, [{0.0000001}]}, pgsql_connection:extended_query("select 0.0000001::numeric", [], Conn)),
+
+        % input
+        ?_assertEqual({{select, 1}, [{123456789012345678901234567890}]}, pgsql_connection:extended_query("select $1::numeric", [123456789012345678901234567890], Conn)),
+        ?_assertEqual({{select, 1}, [{'NaN'}]}, pgsql_connection:extended_query("select $1::numeric", ['NaN'], Conn))
     ]
     end}.
 
