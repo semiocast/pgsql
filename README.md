@@ -45,11 +45,11 @@ Two APIs are available. The current, "native" API is composed of the following f
 
 #### ```simple_query/2,3,4``` ####
 
-Perform a simple query (in PostgreSQL parlance), i.e. a query with no parameter. Results are cast to Erlang-types. Text is returned as binaries (```unicode:unicode_binary()```). Enums are typed ```{atom() :: TypeName, unicode:unicode_binary()}```. See tests (```pgsql_connection_test.erl```) for details.
+Perform a simple query (in PostgreSQL parlance), i.e. a query with no parameter. Results are cast to Erlang-types. Text is returned as binaries (```unicode:unicode_binary()```). Enums are typed ```{atom() :: TypeName, unicode:unicode_binary()}```. See below for details.
 
 #### ```extended_query/3,4,5``` ####
 
-Perform an extended query, i.e. a query with bound parameters. Parameters must be represented in the query with $1, ..., $n placeholders. Most erlang types are supported. Binaries are passed as-is and are interpreted by PostgreSQL as text or binary depending on what is expected. Lists are interpreted as strings, arrays are represented as ```{array, [item()]}```. See tests (```pgsql_connection_test.erl```) for details.
+Perform an extended query, i.e. a query with bound parameters. Parameters must be represented in the query with $1, ..., $n placeholders. Most erlang types are supported. Binaries are passed as-is and are interpreted by PostgreSQL as text or binary depending on what is expected. Lists are interpreted as strings, arrays are represented as ```{array, [any()]}```. See below for details.
 
 #### ```batch_query/3,4,5``` ####
 
@@ -62,6 +62,58 @@ Perform an extended query and fold (resp. map, execute a function on each row). 
 #### ```cancel/1``` ####
     
 Cancel the current running query. This opens a new connection to cancel the query (out-of-band cancelation).
+
+### Data types ###
+
+The following table summarizes the PostgreSQL types currently handled by the driver and their format on input (parameters of ```extended_query/3,4,5```) and on output (e.g. results of select queries).
+
+All types are tested in ```pgsql_connection_test.erl```.
+
+| SQL          |  Erlang                                | Notes                                                                    |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| NULL         | `'null'`                               |                                                                          |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| integer      | `integer()`                            | SQL is limited to up to 131072 digits for numeric type                   |
+| float        | `float()`                              | SQL decimal and numeric values lose precision when converted to double() |
+| NaN          | `'NaN'`                                |                                                                          |
+| ±Infinity    | `'Infinity'`, `'-Infinity'`            |                                                                          |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| text         | `unicode:unicode_binary()`             | Driver expects everything is UTF-8 encoded                               |
+|              | `string()`                             | Strings (lists of integers < 256) can be used on input                   |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| bytea        | `binary()`                             |                                                                          |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| date         | `calendar:date()`                      |                                                                          |
+| time         | `calendar:time()`                      |                                                                          |
+| timestamp    | `calendar:datetime()`                  | Conversion on output with seconds as integer or float is driven by       |
+|              | `{{Y,Mo,D},{H,M,S}} with S::float()`   | `datetime_float_seconds` option                                          |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| boolean      | `boolean()`                            |                                                                          |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| enums        | `{atom(),unicode:unicode_binary()}`    | Values can be used directly on input (as text). Output is always tagged. |
+|              | `{integer(),unicode:unicode_binary()}` | Within the transaction creating the enum, the tag can be the OID         |
+|              | `unicode:unicode_binary()`             |                                                                          |
+|              | `string()`                             |                                                                          |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+|              | `xy() :: {number(), number()}`         | Coordinates can be passed as integers and are always returned as floats  |
+| point        | `{point,xy()}`                         |                                                                          |
+| lseg         | `{lseg,xy(),xy()}`                     |                                                                          |
+| box          | `{box,xy(),xy()}`                      |                                                                          |
+| path         | `{path,open|close,[xy()]}`             |                                                                          |
+| polygon      | `{polygon,[xy()]}`                     |                                                                          |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| inet         | `{inet,inet:address()}`                | Supports both IPv4 and IPv6                                              |
+| cidr         | `{cidr,inet:address(),0..128}`         |                                                                          |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| uuid         | `unicode:unicode_binary()`             | UUID are binaries in AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE format         |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| json         | `{json,unicode:unicode_binary()}`      |                                                                          |
+| jsonb        | `{jsonb,unicode:unicode_binary()}`     |                                                                          |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| arrays       | `{array,list()}`                       |                                                                          |
+|--------------|----------------------------------------|--------------------------------------------------------------------------|
+
+Anything else is not handled yet. Parameters as binaries are passed as is to PostgreSQL, in binary format, and unknown types are returned as `{atom(), binary()}` or `{integer(), binary()}` for unknown OIDs. Theoretically, handling of data types unknown to the driver could be handled by the client. However, please note in this case that the driver can return values in text or binary format depending on the sub-protocol used. Typically, `simple_query` functions will get results in "text format", while `extended_query` will get results in "binary format".
 
 ### COPY support ###
 
