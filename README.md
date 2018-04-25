@@ -72,46 +72,28 @@ All types are tested in ```pgsql_connection_test.erl```.
 | SQL          |  Erlang                                | Notes                                                                    |
 |--------------|----------------------------------------|--------------------------------------------------------------------------|
 | NULL         | `'null'`                               |                                                                          |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
 | integer      | `integer()`                            | SQL is limited to up to 131072 digits for numeric type                   |
 | float        | `float()`                              | SQL decimal and numeric values lose precision when converted to double() |
 | NaN          | `'NaN'`                                |                                                                          |
 | ±Infinity    | `'Infinity'`, `'-Infinity'`            |                                                                          |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
-| text         | `unicode:unicode_binary()`             | Driver expects everything is UTF-8 encoded                               |
-|              | `string()`                             | Strings (lists of integers < 256) can be used on input                   |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| text         | `unicode:unicode_binary() \| string()` | Driver expects everything is UTF-8 encoded, Strings (lists of integers < 256) can be used on input |
 | bytea        | `binary()`                             |                                                                          |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
 | date         | `calendar:date()`                      |                                                                          |
 | time         | `calendar:time()`                      |                                                                          |
-| timestamp    | `calendar:datetime()`                  | Conversion on output with seconds as integer or float is driven by       |
-|              | `{{Y,Mo,D},{H,M,S}} with S::float()`   | `datetime_float_seconds` option                                          |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| timestamp    | `calendar:datetime() \| {{Y,Mo,D},{H,M,S}} with S::float()` | Conversion on output with seconds as integer or float is driven by `datetime_float_seconds` option |
 | boolean      | `boolean()`                            |                                                                          |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
-| enums        | `{atom(),unicode:unicode_binary()}`    | Values can be used directly on input (as text). Output is always tagged. |
-|              | `{integer(),unicode:unicode_binary()}` | Within the transaction creating the enum, the tag can be the OID         |
-|              | `unicode:unicode_binary()`             |                                                                          |
-|              | `string()`                             |                                                                          |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
-|              | `xy() :: {number(), number()}`         | Coordinates can be passed as integers and are always returned as floats  |
-| point        | `{point,xy()}`                         |                                                                          |
-| lseg         | `{lseg,xy(),xy()}`                     |                                                                          |
-| box          | `{box,xy(),xy()}`                      |                                                                          |
-| path         | `{path,open|close,[xy()]}`             |                                                                          |
-| polygon      | `{polygon,[xy()]}`                     |                                                                          |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
+| enums        | `{atom(),unicode:unicode_binary()} \| {integer(),unicode:unicode_binary()} \| unicode:unicode_binary() \| string()`    | Values can be used directly on input (as text). Output is always tagged. Within the transaction creating the enum, the tag can be the OID |
+| point        | `{point,{number(),number()}}`          | Coordinates can be passed as integers and are always returned as floats  |
+| lseg         | `{lseg,{number(),number()},{number(),number()}}` |                                                                |
+| box          | `{box,{number(),number()},{number(),number()}}` |                                                                 |
+| path         | `{path,open\|close,[{number(),number()}]}` |                                                                      |
+| polygon      | `{polygon,[{number(),number()}]}`      |                                                                          |
 | inet         | `{inet,inet:address()}`                | Supports both IPv4 and IPv6                                              |
 | cidr         | `{cidr,inet:address(),0..128}`         |                                                                          |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
 | uuid         | `unicode:unicode_binary()`             | UUID are binaries in AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE format         |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
 | json         | `{json,unicode:unicode_binary()}`      |                                                                          |
 | jsonb        | `{jsonb,unicode:unicode_binary()}`     |                                                                          |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
 | arrays       | `{array,list()}`                       |                                                                          |
-|--------------|----------------------------------------|--------------------------------------------------------------------------|
 
 Anything else is not handled yet. Parameters as binaries are passed as is to PostgreSQL, in binary format, and unknown types are returned as `{atom(), binary()}` or `{integer(), binary()}` for unknown OIDs. Theoretically, handling of data types unknown to the driver could be handled by the client. However, please note in this case that the driver can return values in text or binary format depending on the sub-protocol used. Typically, `simple_query` functions will get results in "text format", while `extended_query` will get results in "binary format".
 
