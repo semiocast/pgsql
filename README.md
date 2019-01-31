@@ -37,7 +37,7 @@ The application must be started before connections can be made to a PostgreSQL s
 
 The main module is ```pgsql_connection```. Connections are opened with one of ```pgsql_connection:open/1,2,3,4,5``` functions. Please refer to ```pgsql_connection.erl``` for details.
 
-For convenience with other database APIs, connection objects can be used as parametrized modules as connection objects are ```{pgsql_connection, pid()}``` tuples. API functions taking a connection as the last parameter can be called with the connection as the parametrized module. For example, a connection can be closed with ```pgsql_connection:close(Connection)``` or with ```Connection:close()```.
+Connection objects are ```{pgsql_connection, pid()}``` tuples. As a result, and following other database APIs, connection objects can be used as [parametrized modules](http://erlang.se/workshop/2003/paper/p29-carlsson.pdf). API functions taking a connection as the last parameter can be called with the connection as the parametrized module. For example, a connection can be closed with ```pgsql_connection:close(Connection)``` or with ```Connection:close()```.
 
 ### Performing queries ###
 
