@@ -54,6 +54,16 @@ open_close_test_() ->
             R = pgsql_connection:open([{host, "0.0.0.0"}, {database, "test"}, {user, "test"}, {password, ""}]),
             pgsql_connection:close(R)
         end)},
+        {"Open connection to test database with url as an option",
+        ?_test(begin
+            R = pgsql_connection:open([{url, "postgres://test:@0.0.0.0/test"}]),
+            pgsql_connection:close(R)
+        end)},
+        {"Open connection to test database with url as parameter",
+        ?_test(begin
+            R = pgsql_connection:open("postgres://test:@0.0.0.0/test"),
+            pgsql_connection:close(R)
+        end)},
         {"Bad user throws",
         ?_test(begin
             try
@@ -718,8 +728,8 @@ float_types_test_() ->
         ?_assertEqual({selected, [{1.0}]}, pgsql_connection:param_query("select 1.0::float4", [], Conn)),
         ?_assertEqual({selected, [{1.0}]}, pgsql_connection:param_query("select 1.0::float8", [], Conn)),
 
-        ?_assertEqual({selected, [{3.14159}]}, pgsql_connection:sql_query("select 3.141592653589793::float4", Conn)),
-        ?_assertEqual({selected, [{3.14159265358979}]}, pgsql_connection:sql_query("select 3.141592653589793::float8", Conn)),
+        ?_assertEqual({selected, [{3.1415927}]}, pgsql_connection:sql_query("select 3.141592653589793::float4", Conn)),
+        ?_assertEqual({selected, [{3.141592653589793}]}, pgsql_connection:sql_query("select 3.141592653589793::float8", Conn)),
         ?_assertEqual({selected, [{3.1415927410125732}]}, pgsql_connection:param_query("select 3.141592653589793::float4", [], Conn)),
         ?_assertEqual({selected, [{3.141592653589793}]}, pgsql_connection:param_query("select 3.141592653589793::float8", [], Conn)),
 
