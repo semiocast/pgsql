@@ -72,7 +72,10 @@
     handle_cast/2,
     code_change/3,
     handle_info/2,
-    terminate/2
+    terminate/2,
+
+    % url parser
+    parse_url/1
     ]).
 
 -export_type([
@@ -569,29 +572,11 @@ terminate(_Reason, #state{socket = {SocketModule, Socket}}) ->
     SocketModule:close(Socket),
     ok.
 
-%%====================================================================
-%% Private functions
-%%====================================================================
-
-
-%% @doc splits string, but when unsplittable, assigns result 
-%%      to second part. First part is an empty string ("").
-split_to_second_part([OnlyOne]) ->
-    ["", OnlyOne];
-split_to_second_part([One, Two]) ->
-    [One, Two].
-
-%% @doc splits string, but when unsplittable, assigns result 
-%%      to second part. First part is an empty string ("").
-split_to_first_part([OnlyOne]) ->
-    [OnlyOne, ""];
-split_to_first_part([One, Two]) ->
-    [One, Two].
-
 %%--------------------------------------------------------------------
 %% @doc Parse a postgres connection URL into components
 %%
 %% Example: postgres://username:password@host:port/database
+-spec parse_url(iodata()) -> [].
 parse_url("postgres://"++_RemainingUrl) -> 
     [Credentials, HostPortDatabase] = split_to_second_part(string:split(_RemainingUrl, "@")),
     [Username, Password] = split_to_first_part(string:split(Credentials, ":")),
@@ -611,8 +596,10 @@ parse_url("postgres://"++_RemainingUrl) ->
         true -> ParsedOptionsWithPassword
     end,
     ParsedOptionsWithPort = case string:is_empty(Port) of 
-        false -> [Portnum, _] = string:to_integer(Port),
-                ParsedOptionsWithHost ++ [{port, Portnum}];
+        false -> case string:to_integer(Port) of
+            {Portnum, _} -> ParsedOptionsWithHost ++ [{port, Portnum}];
+            {error, Reason} -> throw(io_lib:format("Unable to parse port ~p into an integer due to: ~p", Port, Reason))
+        end;
         true -> ParsedOptionsWithHost
     end,
     ParsedOptionsWithDatabase = case string:is_empty(Database) of 
@@ -620,6 +607,25 @@ parse_url("postgres://"++_RemainingUrl) ->
         true -> ParsedOptionsWithPort
     end,
     ParsedOptionsWithDatabase.
+
+%%====================================================================
+%% Private functions
+%%====================================================================
+
+
+%% @doc splits string, but when unsplittable, assigns result 
+%%      to second part. First part is an empty string ("").
+split_to_second_part([OnlyOne]) ->
+    ["", OnlyOne];
+split_to_second_part([One, Two]) ->
+    [One, Two].
+
+%% @doc splits string, but when unsplittable, assigns result 
+%%      to second part. First part is an empty string ("").
+split_to_first_part([OnlyOne]) ->
+    [OnlyOne, ""];
+split_to_first_part([One, Two]) ->
+    [One, Two].
 
 %%--------------------------------------------------------------------
 %% @doc Actually open (or re-open) the connection.
