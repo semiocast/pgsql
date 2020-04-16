@@ -72,7 +72,10 @@
     handle_cast/2,
     code_change/3,
     handle_info/2,
-    terminate/2
+    terminate/2,
+
+    % url parser
+    parse_url/1
     ]).
 
 -export_type([
@@ -126,7 +129,8 @@
 
 % driver options.
 -type open_option() ::
-        {host, inet:ip_address() | inet:hostname()} % default: ?DEFAULT_HOST
+        {url, iodata()} % default: none
+    |   {host, inet:ip_address() | inet:hostname()} % default: ?DEFAULT_HOST
     |   {port, integer()}                       % default: ?DEFAULT_PORT
     |   {database, iodata()}                    % default: user
     |   {user, iodata()}                        % default: ?DEFAULT_USER
@@ -198,6 +202,8 @@
 -spec open(iodata() | open_options()) -> pgsql_connection().
 open([Option | _OptionsT] = Options) when is_tuple(Option) orelse is_atom(Option) ->
     open0(Options);
+open(("postgres://" ++ _) = Url) ->
+    open([{url, Url}]);
 open(Database) ->
     open(Database, ?DEFAULT_USER).
 
@@ -234,7 +240,8 @@ open0(Options) ->
     case pgsql_connection_sup:start_child(Options) of
         {ok, Pid} ->
             {pgsql_connection, Pid};
-        {error, Error} -> throw(Error)
+        {error, Error} -> 
+            throw(Error)
     end.
 
 %%--------------------------------------------------------------------
@@ -245,6 +252,7 @@ close({pgsql_connection, Pid}) ->
     MonitorRef = erlang:monitor(process, Pid),
     exit(Pid, shutdown),
     receive {'DOWN', MonitorRef, process, Pid, _Info} -> ok end.
+
 
 %%--------------------------------------------------------------------
 %% @doc Perform a query.
@@ -564,14 +572,86 @@ terminate(_Reason, #state{socket = {SocketModule, Socket}}) ->
     SocketModule:close(Socket),
     ok.
 
+%%--------------------------------------------------------------------
+%% @doc Parse a postgres connection URL into components
+%%
+%% Example: postgres://username:password@host:port/database
+-spec parse_url(iodata()) -> [].
+parse_url("postgres://"++_RemainingUrl) -> 
+    [Credentials, HostPortDatabase] = split_to_second_part(string:split(_RemainingUrl, "@")),
+    [Username, Password] = split_to_first_part(string:split(Credentials, ":")),
+    [HostPort, Database] = split_to_first_part(string:split(HostPortDatabase, "/")),
+    [Host, Port] = split_to_first_part(string:split(HostPort, ":")),
+    ParsedOptionsEmpty = [],
+    ParsedOptionsWithUserName = case string:is_empty(Username) of
+            false -> ParsedOptionsEmpty ++ [{user, Username}];
+            true -> ParsedOptionsEmpty
+    end,
+    ParsedOptionsWithPassword = case string:is_empty(Password) of
+        false -> ParsedOptionsWithUserName ++ [{password, Password}];
+        true -> ParsedOptionsWithUserName
+    end,
+    ParsedOptionsWithHost = case string:is_empty(Host) of 
+        false  -> ParsedOptionsWithPassword ++ [{host, Host}];
+        true -> ParsedOptionsWithPassword
+    end,
+    ParsedOptionsWithPort = case string:is_empty(Port) of 
+        false -> case string:to_integer(Port) of
+            {Portnum, _} -> ParsedOptionsWithHost ++ [{port, Portnum}];
+            {error, Reason} -> throw(io_lib:format("Unable to parse port ~p into an integer due to: ~p", Port, Reason))
+        end;
+        true -> ParsedOptionsWithHost
+    end,
+    ParsedOptionsWithDatabase = case string:is_empty(Database) of 
+        false -> ParsedOptionsWithPort ++ [{database, Database}];
+        true -> ParsedOptionsWithPort
+    end,
+    ParsedOptionsWithDatabase.
+
 %%====================================================================
 %% Private functions
 %%====================================================================
 
+
+%% @doc splits string, but when unsplittable, assigns result 
+%%      to second part. First part is an empty string ("").
+split_to_second_part([OnlyOne]) ->
+    ["", OnlyOne];
+split_to_second_part([One, Two]) ->
+    [One, Two].
+
+%% @doc splits string, but when unsplittable, assigns result 
+%%      to second part. First part is an empty string ("").
+split_to_first_part([OnlyOne]) ->
+    [OnlyOne, ""];
+split_to_first_part([One, Two]) ->
+    [One, Two].
+
 %%--------------------------------------------------------------------
 %% @doc Actually open (or re-open) the connection.
 %%
-pgsql_open(#state{options = Options} = State0) ->
+pgsql_open(#state{options = RawOptions} = RawState0) ->
+    Url = proplists:get_value(url, RawOptions, ""),
+    NotEmpty = not string:is_empty(Url),
+    Options = if NotEmpty ->
+            ParsedFromUrlOptions = parse_url(Url),
+            OriginalWithoutUrlOptions = proplists:delete(url, RawOptions),
+            UnifiedOptions = ParsedFromUrlOptions++OriginalWithoutUrlOptions,
+            UnifiedOptions;
+        true -> RawOptions
+    end,
+    State0=#state{
+        options = Options,
+        socket = RawState0#state.socket,
+        subscribers = RawState0#state.subscribers,
+        backend_procid = RawState0#state.backend_procid,
+        backend_secret = RawState0#state.backend_secret,
+        integer_datetimes = RawState0#state.integer_datetimes,
+        oidmap = RawState0#state.oidmap,
+        current = RawState0#state.current,
+        pending = RawState0#state.pending,
+        statement_timeout = RawState0#state.statement_timeout
+    },
     Host = proplists:get_value(host, Options, ?DEFAULT_HOST),
     Port = proplists:get_value(port, Options, ?DEFAULT_PORT),
     % First open a TCP connection

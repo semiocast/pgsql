@@ -41,4 +41,5 @@ init(_Args) ->
 %%
 -spec start_child([{atom(), string()}]) -> {ok, pid()} | {error, any()}.
 start_child(Options) ->
-    supervisor:start_child(?MODULE, [Options]).
+    Result = supervisor:start_child(?MODULE, [Options]),
+    Result.

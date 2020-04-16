@@ -13,6 +13,81 @@ kill_sup(SupPid) ->
     receive {'EXIT', SupPid, _Reason} -> ok after 5000 -> throw({error, timeout}) end,
     process_flag(trap_exit, OldTrapExit).
 
+url_parse_test_() ->
+    {setup,
+    fun() ->
+        {ok, Pid} = pgsql_connection_sup:start_link(),
+        Pid
+    end,
+    fun(SupPid) ->
+        kill_sup(SupPid)
+    end,
+    [
+        {"Parse everything",
+        ?_test(begin
+            Options = pgsql_connection:parse_url("postgres://username:password@host1:3241/database3"),
+            User = proplists:get_value(user, Options),
+            Password = proplists:get_value(password, Options),
+            Host = proplists:get_value(host, Options),
+            Port = proplists:get_value(port, Options),
+            Database = proplists:get_value(database, Options),
+            ?assertEqual("username", User),
+            ?assertEqual("password", Password),
+            ?assertEqual("host1", Host),
+            ?assertEqual(3241, Port),
+            ?assertEqual("database3", Database)
+        end)},
+        {"Parse only username, no password",
+        ?_test(begin
+            Options = pgsql_connection:parse_url("postgres://:password@host1"),
+            Password = proplists:get_value(password, Options),
+            Host = proplists:get_value(host, Options),
+            ?assertEqual("password", Password),
+            ?assertEqual("host1", Host)
+        end)},
+        {"Parse only password, no username",
+        ?_test(begin
+            Options = pgsql_connection:parse_url("postgres://username@host1"),
+            User = proplists:get_value(user, Options),
+            Host = proplists:get_value(host, Options),
+            ?assertEqual("username", User),
+            ?assertEqual("host1", Host)
+        end)},
+        {"Parse only host and database",
+        ?_test(begin
+            Options = pgsql_connection:parse_url("postgres://host1/database3"),
+            Host = proplists:get_value(host, Options),
+            Database = proplists:get_value(database, Options),
+            ?assertEqual("host1", Host),
+            ?assertEqual("database3", Database)
+        end)},
+        {"Parse username, password, port and database (no host)",
+        ?_test(begin
+            Options = pgsql_connection:parse_url("postgres://username:password@:3241/database3"),
+            User = proplists:get_value(user, Options),
+            Password = proplists:get_value(password, Options),
+            Port = proplists:get_value(port, Options),
+            Database = proplists:get_value(database, Options),
+            ?assertEqual("username", User),
+            ?assertEqual("password", Password),
+            ?assertEqual(3241, Port),
+            ?assertEqual("database3", Database)
+        end)},
+        {"Parse only host",
+        ?_test(begin
+            Options = pgsql_connection:parse_url("postgres://host5"),
+            Host = proplists:get_value(host, Options),
+            ?assertEqual("host5", Host)
+        end)},
+        {"Parse host and port",
+        ?_test(begin
+            Options = pgsql_connection:parse_url("postgres://host5:4562"),
+            Host = proplists:get_value(host, Options),
+            Port = proplists:get_value(port, Options),
+            ?assertEqual("host5", Host),
+            ?assertEqual(4562, Port)
+        end)}
+    ]}.
 
 open_close_test_() ->
     {setup,
@@ -52,6 +127,16 @@ open_close_test_() ->
         {"Open connection to test database with options as list",
         ?_test(begin
             R = pgsql_connection:open([{host, "0.0.0.0"}, {database, "test"}, {user, "test"}, {password, ""}]),
+            pgsql_connection:close(R)
+        end)},
+        {"Open connection to test database with url as an option",
+        ?_test(begin
+            R = pgsql_connection:open([{url, "postgres://test:@0.0.0.0/test"}]),
+            pgsql_connection:close(R)
+        end)},
+        {"Open connection to test database with url as parameter",
+        ?_test(begin
+            R = pgsql_connection:open("postgres://test:@0.0.0.0/test"),
             pgsql_connection:close(R)
         end)},
         {"Bad user throws",
@@ -718,8 +803,8 @@ float_types_test_() ->
         ?_assertEqual({selected, [{1.0}]}, pgsql_connection:param_query("select 1.0::float4", [], Conn)),
         ?_assertEqual({selected, [{1.0}]}, pgsql_connection:param_query("select 1.0::float8", [], Conn)),
 
-        ?_assertEqual({selected, [{3.14159}]}, pgsql_connection:sql_query("select 3.141592653589793::float4", Conn)),
-        ?_assertEqual({selected, [{3.14159265358979}]}, pgsql_connection:sql_query("select 3.141592653589793::float8", Conn)),
+        ?_assertEqual({selected, [{3.1415927}]}, pgsql_connection:sql_query("select 3.141592653589793::float4", Conn)),
+        ?_assertEqual({selected, [{3.141592653589793}]}, pgsql_connection:sql_query("select 3.141592653589793::float8", Conn)),
         ?_assertEqual({selected, [{3.1415927410125732}]}, pgsql_connection:param_query("select 3.141592653589793::float4", [], Conn)),
         ?_assertEqual({selected, [{3.141592653589793}]}, pgsql_connection:param_query("select 3.141592653589793::float8", [], Conn)),
 
